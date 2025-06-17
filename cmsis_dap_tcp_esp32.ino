@@ -1,6 +1,8 @@
 /*
  * Arduino sketch supporting CMSIS-DAP over TCP/IP.
  * Refer to the dap folder for the CMSIS-DAP sources.
+ * Refer to the OpenOCD file src/jtag/drivers/cmsis_dap_tcp.c for the host
+ * implementation.
  *
  * Runs on the ESP32-C6 currently. To support another board / CPU,
  * dap/DAP_config.h will need to be modified.
@@ -23,13 +25,13 @@
  *         -c "adapter speed 2000" \
  *         -c "program firmware.elf verify reset exit"
  *
- * Supports:
- * - JTAG or SWD mode.
- * - DAP over tcp/XXXX
- * - target console serial port over tcp/XXXX
- * - SWO trace over tcp/XXXX
+ * Status:
+ * - DAP uses tcp port 4441 by default.
+ * - SWD mode only. JTAG support may be added in the future.
+ * - Target console serial port currently unsupported.
+ * - SWO trace port currently unsupported.
  *
- * Prerequisite libraries must be installed first:
+ * Prerequisite libraries that must be installed first:
  *     https://github.com/contrem/arduino-timer
  */
 
@@ -53,48 +55,17 @@
 #error "WIFI_SSID and WIFI_PASSWORD must be defined! Add them to wifi_password.h"
 #endif
 
+// TCP port number used for CMSIS-DAP.
+#define CMSIS_DAP_TCP_PORT      4441
+
 // Define if we should wait for USB serial port to be opened at boot.
 #undef WAIT_FOR_USB_SERIAL_PORT
-
-// Hardware version, for reporting to OpenOCD.
-//#define HW_VERSION_MAJOR    1
-//#define HW_VERSION_MINOR    0
-
-#if 0
-// Define a supported board. See below.
-#define BOARD_XIAO_ESP32C6
-
-// GPIO pins used on the board.
-// Change these if necessary to match your hardware.
-#if defined(BOARD_XIAO_ESP32C6)
-#define GPIO_SWCLK          GPIO_NUM_21   // D3
-#define GPIO_SWDIO          GPIO_NUM_22   // D4
-#define GPIO_SRESET         GPIO_NUM_16   // D6
-#define LED_PIN             LED_BUILTIN
-
-#elif defined(BOARD_ESP32_C6_MINI_1)
-#define GPIO_SWCLK          GPIO_NUM_21
-#define GPIO_SWDIO          GPIO_NUM_22
-#define GPIO_SWDIO_UNUSED   GPIO_NUM_23   // future experimental use of MOSI/MISO.
-#define GPIO_SRESET         GPIO_NUM_16
-#define LED_PIN             GPIO_NUM_7
-
-#else
-#error "Board not defined!"
-#endif
-#endif
 
 static Timer<2> timer;
 static bool led_state;
 static int wifi_drop_count;
 static uint8_t mac_addr[6];
 static char mac_addr_str[16];
-
-// FIXME
-extern "C" {
-extern int cmsis_dap_tcp_process(void);
-extern int cmsis_dap_tcp_init(int port_number);
-}
 
 static void print_wifi_status()
 {
@@ -150,55 +121,19 @@ static bool check_wifi_callback(void* arg)
   return true;
 }
 
-#if 0
-static bool led_off_callback(void* arg)
-{
-  (void)arg;
-  set_led(false);
-  return false; // false to stop
-}
-
-static inline void set_led(bool enable)
-{
-  if (enable)
-    digitalWrite(LED_PIN, HIGH);
-  else
-    digitalWrite(LED_PIN, LOW);
-}
-
-static inline void blink_led()
-{
-  // Pulse the LED on for 25 msec.
-  set_led(true);
-  timer.in(25, led_off_callback);
-}
-#endif
-
 /// ----------------------------------------------------------------------------
 
 void setup(void)
 {
-  // Init SWD JTAG pins.
+  // Init SWD port pins.
   PORT_SWD_SETUP();
-
-  // Init LED (active low).
-  //pinMode(LED_PIN, OUTPUT);
-  //digitalWrite(LED_PIN, HIGH);
 
   // Initialize USB serial port for debugging.
   Serial.begin(115200);
 #ifdef WAIT_FOR_USB_SERIAL_PORT
   while (!Serial);
 #endif
-  Serial.print("\nESP32 cmsis_dap_tcp booting (HW version ");
-#if 0
-  Serial.print(HW_VERSION_MAJOR);
-  Serial.print(".");
-  Serial.print(HW_VERSION_MINOR);
-  Serial.print(", SW version 0x");
-  Serial.print(REMOTE_SWD_SW_VERSION, HEX);
-  Serial.println(") ...");
-#endif
+  Serial.println("\nESP32 cmsis_dap_tcp booting");
 
   // MAC address is unique for every ESP32 device. Use it as a UID
   // when reporing data.
@@ -218,23 +153,13 @@ void setup(void)
   connect_wifi();
   timer.every(10000, check_wifi_callback);
 
-#if 0
-  // Initialize the SWD library.
-  uint16_t hw_version = ((HW_VERSION_MAJOR & 0xFF) << 8) |
-                         (HW_VERSION_MINOR & 0xFF);
-  int ret = remote_swd_server_init(
-              serial_number, hw_version, REMOTE_SWD_TCP_PORT,
-              swdio_swclk_init, swdio_input, swdio_output,
-              swdio_write, swdio_read, swclk_send_pulse, set_srst);
-  if(ret < 0)
-    fprintf(stderr, "Failed initializing remote_swd server.\n");
-#endif
-  // Initialize the TCP server.
-  cmsis_dap_tcp_init(4441);
+  // Initialize the CMSIS-DAP tcp server.
+  cmsis_dap_tcp_init(CMSIS_DAP_TCP_PORT);
 }
 
 void loop(void)
 {
+  // Handle the CMSIS-DAP commands.
   cmsis_dap_tcp_process();
 
   // Update the timer.

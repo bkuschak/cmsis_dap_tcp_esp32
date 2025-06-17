@@ -44,8 +44,11 @@
 // GPIO pins used on the board.
 // Change these if necessary to match your hardware.
 #if defined(BOARD_XIAO_ESP32C6)
-#define GPIO_SWCLK          GPIO_NUM_21   // D3
-#define GPIO_SWDIO          GPIO_NUM_22   // D4
+#define GPIO_SWCLK_TCK      GPIO_NUM_21   // D3  TODO GPIO19
+#define GPIO_SWDIO_TMS      GPIO_NUM_22   // D4  TODO GPIO18 and GPIO20
+#define GPIO_TDO            GPIO_NUM_23   // D4  TODO GPIO21
+#define GPIO_TDI            GPIO_NUM_22   // D4  TODO GPIO22
+#define GPIO_NTRST          GPIO_NUM_22   // D4  TODO GPIO23
 #define GPIO_NRESET         GPIO_NUM_16   // D6
 #define GPIO_LED            GPIO_NUM_15
 
@@ -97,7 +100,7 @@ This information includes:
 
 /// Indicate that JTAG communication mode is available at the Debug Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
-#define DAP_JTAG                0               ///< JTAG Mode: 1 = available, 0 = not available.
+#define DAP_JTAG                1               ///< JTAG Mode: 1 = available, 0 = not available.
 
 /// Configure maximum number of JTAG devices on the scan chain connected to the Debug Access Port.
 /// This setting impacts the RAM requirements of the Debug Unit. Valid range is 1 .. 255.
@@ -354,7 +357,37 @@ Configures the DAP Hardware I/O pins for JTAG mode:
 */
 __STATIC_INLINE void PORT_JTAG_SETUP (void)
 {
-    ;
+    // Use the slower gpio_ functions for the initial setup. Later, use direct
+    // register access later for toggling the pins quickly.
+    gpio_reset_pin(GPIO_SWCLK_TCK);
+    gpio_reset_pin(GPIO_SWDIO_TMS);
+    gpio_reset_pin(GPIO_TDI);
+    gpio_reset_pin(GPIO_TDO);
+    gpio_reset_pin(GPIO_NTRST);
+    gpio_reset_pin(GPIO_NRESET);
+    gpio_reset_pin(GPIO_LED);
+
+    gpio_set_level(GPIO_SWCLK_TCK, 1);
+    gpio_set_level(GPIO_SWDIO_TMS, 1);
+    gpio_set_level(GPIO_TDI, 1);
+    gpio_set_level(GPIO_NTRST, 1);
+    gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
+    gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_OUTPUT);
+    gpio_set_direction(GPIO_TDI, GPIO_MODE_OUTPUT);
+    gpio_set_direction(GPIO_NTRST, GPIO_MODE_OUTPUT);
+    gpio_set_direction(GPIO_TDO, GPIO_MODE_INPUT);
+
+    // NTRST as input with pullup, until commanded otherwise.
+    gpio_pullup_en(GPIO_NTRST);
+    gpio_set_direction(GPIO_NTRST, GPIO_MODE_INPUT);
+
+    // NRESET (SRST) as input with pullup, until commanded otherwise.
+    gpio_pullup_en(GPIO_NRESET);
+    gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
+
+    // LED off (active low)
+    gpio_set_level(GPIO_LED, 1);
+    gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
 }
 
 /** Setup SWD I/O pins: SWCLK, SWDIO, and nRESET.
@@ -366,8 +399,8 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
 {
     // Use the slower gpio_ functions for the initial setup. Later, use direct
     // register access later for toggling the pins quickly.
-    gpio_reset_pin(GPIO_SWCLK);
-    gpio_reset_pin(GPIO_SWDIO);
+    gpio_reset_pin(GPIO_SWCLK_TCK);
+    gpio_reset_pin(GPIO_SWDIO_TMS);
     gpio_reset_pin(GPIO_NRESET);
     gpio_reset_pin(GPIO_LED);
 
@@ -376,19 +409,19 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
     gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
 
     // SWCLK as output low.
-    gpio_set_level(GPIO_SWCLK, 0);
-    gpio_set_direction(GPIO_SWCLK, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_SWCLK_TCK, 0);
+    gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
 
     // SWD as input.
-    gpio_pullup_en(GPIO_SWDIO);
-    gpio_set_direction(GPIO_SWDIO, GPIO_MODE_INPUT);
+    gpio_pullup_en(GPIO_SWDIO_TMS);
+    gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_INPUT);
 
     // SWD as input.
-    GPIO.enable_w1tc.enable_w1tc = (1<<GPIO_SWDIO);
+    GPIO.enable_w1tc.enable_w1tc = (1<<GPIO_SWDIO_TMS);
 
     // SWCLK as output low.
-    GPIO.out_w1tc.val = 1<<GPIO_SWCLK;
-    GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_SWCLK;
+    GPIO.out_w1tc.val = 1<<GPIO_SWCLK_TCK;
+    GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_SWCLK_TCK;
 
     // LED off (active low)
     gpio_set_level(GPIO_LED, 1);
@@ -401,8 +434,11 @@ Disables the DAP Hardware I/O pins which configures:
 */
 __STATIC_INLINE void PORT_OFF (void)
 {
-    gpio_reset_pin(GPIO_SWCLK);
-    gpio_reset_pin(GPIO_SWDIO);
+    gpio_reset_pin(GPIO_SWCLK_TCK);
+    gpio_reset_pin(GPIO_SWDIO_TMS);
+    gpio_reset_pin(GPIO_TDI);
+    gpio_reset_pin(GPIO_TDO);
+    gpio_reset_pin(GPIO_NTRST);
     gpio_reset_pin(GPIO_NRESET);
 }
 
@@ -414,7 +450,7 @@ __STATIC_INLINE void PORT_OFF (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWCLK_TCK_IN  (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_SWCLK)) ? 1 : 0;
+    return (GPIO.in.in_data_next & (1<<GPIO_SWCLK_TCK)) ? 1 : 0;
 }
 
 /** SWCLK/TCK I/O pin: Set Output to High.
@@ -422,7 +458,7 @@ Set the SWCLK/TCK DAP hardware I/O pin to high level.
 */
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_SET (void)
 {
-    GPIO.out_w1ts.val = 1<<GPIO_SWCLK;
+    GPIO.out_w1ts.val = 1<<GPIO_SWCLK_TCK;
 }
 
 /** SWCLK/TCK I/O pin: Set Output to Low.
@@ -430,7 +466,7 @@ Set the SWCLK/TCK DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void)
 {
-    GPIO.out_w1tc.val = 1<<GPIO_SWCLK;
+    GPIO.out_w1tc.val = 1<<GPIO_SWCLK_TCK;
 }
 
 
@@ -441,7 +477,7 @@ __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_TMS_IN  (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_SWDIO)) ? 1 : 0;
+    return (GPIO.in.in_data_next & (1<<GPIO_SWDIO_TMS)) ? 1 : 0;
 }
 
 /** SWDIO/TMS I/O pin: Set Output to High.
@@ -449,7 +485,7 @@ Set the SWDIO/TMS DAP hardware I/O pin to high level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_SET (void)
 {
-    GPIO.out_w1ts.val = 1<<GPIO_SWDIO;
+    GPIO.out_w1ts.val = 1<<GPIO_SWDIO_TMS;
 }
 
 /** SWDIO/TMS I/O pin: Set Output to Low.
@@ -457,7 +493,7 @@ Set the SWDIO/TMS DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_CLR (void)
 {
-    GPIO.out_w1tc.val = 1<<GPIO_SWDIO;
+    GPIO.out_w1tc.val = 1<<GPIO_SWDIO_TMS;
 }
 
 /** SWDIO I/O pin: Get Input (used in SWD mode only).
@@ -465,7 +501,7 @@ __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_CLR (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_SWDIO)) ? 1 : 0;
+    return (GPIO.in.in_data_next & (1<<GPIO_SWDIO_TMS)) ? 1 : 0;
 }
 
 /** SWDIO I/O pin: Set Output (used in SWD mode only).
@@ -474,9 +510,9 @@ __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void)
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT     (uint32_t bit)
 {
     if(bit & 1)
-        GPIO.out_w1ts.val = 1<<GPIO_SWDIO;
+        GPIO.out_w1ts.val = 1<<GPIO_SWDIO_TMS;
     else
-        GPIO.out_w1tc.val = 1<<GPIO_SWDIO;
+        GPIO.out_w1tc.val = 1<<GPIO_SWDIO_TMS;
 }
 
 /** SWDIO I/O pin: Switch to Output mode (used in SWD mode only).
@@ -485,7 +521,7 @@ called prior \ref PIN_SWDIO_OUT function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_ENABLE  (void)
 {
-    GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_SWDIO;
+    GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_SWDIO_TMS;
 }
 
 /** SWDIO I/O pin: Switch to Input mode (used in SWD mode only).
@@ -494,7 +530,7 @@ called prior \ref PIN_SWDIO_IN function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 {
-    GPIO.enable_w1tc.enable_w1tc = 1<<GPIO_SWDIO;
+    GPIO.enable_w1tc.enable_w1tc = 1<<GPIO_SWDIO_TMS;
 }
 
 
@@ -505,7 +541,7 @@ __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_TDI_IN  (void)
 {
-    return (0U);
+    return (GPIO.in.in_data_next & (1<<GPIO_TDI)) ? 1 : 0;
 }
 
 /** TDI I/O pin: Set Output.
@@ -513,7 +549,10 @@ __STATIC_FORCEINLINE uint32_t PIN_TDI_IN  (void)
 */
 __STATIC_FORCEINLINE void     PIN_TDI_OUT (uint32_t bit)
 {
-    ;
+    if(bit & 1)
+        GPIO.out_w1ts.val = 1<<GPIO_TDI;
+    else
+        GPIO.out_w1tc.val = 1<<GPIO_TDI;
 }
 
 
@@ -524,7 +563,7 @@ __STATIC_FORCEINLINE void     PIN_TDI_OUT (uint32_t bit)
 */
 __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 {
-    return (0U);
+    return (GPIO.in.in_data_next & (1<<GPIO_TDO)) ? 1 : 0;
 }
 
 
@@ -535,7 +574,7 @@ __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 {
-    return (0U);
+    return (GPIO.in.in_data_next & (1<<GPIO_NTRST)) ? 1 : 0;
 }
 
 /** nTRST I/O pin: Set Output.
@@ -545,7 +584,10 @@ __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 */
 __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 {
-    ;
+    if(bit & 1)
+        GPIO.out_w1ts.val = 1<<GPIO_NTRST;
+    else
+        GPIO.out_w1tc.val = 1<<GPIO_NTRST;
 }
 
 // nRESET Pin I/O------------------------------------------
@@ -656,8 +698,8 @@ Status LEDs. In detail the operation of Hardware I/O and LED pins are enabled an
 */
 __STATIC_INLINE void DAP_SETUP (void)
 {
-    gpio_reset_pin(GPIO_SWCLK);
-    gpio_reset_pin(GPIO_SWDIO);
+    gpio_reset_pin(GPIO_SWCLK_TCK);
+    gpio_reset_pin(GPIO_SWDIO_TMS);
     gpio_reset_pin(GPIO_NRESET);
     gpio_pullup_en(GPIO_NRESET);
 

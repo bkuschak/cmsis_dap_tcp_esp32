@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// Don't use ARM assembler
+// Don't use ARM assembler.
 #define __CC_ARM
 
 #define __STATIC_INLINE static inline

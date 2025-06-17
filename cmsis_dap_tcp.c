@@ -23,25 +23,6 @@
 #define h_u32_to_le(a)  __bswap_32(a)
 #endif
 
-#if 0
-// TODO - if the DAP requests are different sizes, we will need to delineate packet boundaries.
-// Use a small header to do this. Implement the read using a state machine.
-// Use network byte order for header. FIXME - to be consistent with CMSIS-DAP packets, use LE format.
-// h_u16_to_le() le_to_h_u16() for conversion.
-struct cmsis_dap_tcp_packet_hdr {
-    uint32_t signature;     // "DAP\0"
-    uint16_t length;        // Not including header length.
-    uint8_t packet_type;    // Currently only one type defined.
-    uint8_t reserved;       // Reserved for future use.
-};
-
-#define DAP_PKT_HDR_SIGNATURE   0x01020304
-#define DAP_PKT_TYPE_REQUEST    0x01
-#define DAP_PKT_TYPE_RESPONSE   0x02
-#endif
-
-//uint8_t dap_request_packet[CMSIS_DAP_PACKET_SIZE + sizeof(struct cmsis_dap_tcp_packet_hdr)];
-
 // Only a single client at a time may be connected.
 static int client_sockfd;
 static int server_sockfd;
@@ -240,14 +221,6 @@ static int send_dap_response(uint8_t *buf, int len)
     uint8_t *payload = packet + sizeof(*header);
     memcpy(payload, buf, len);
 
-    // TODO we want to send all responses in a single TCP send() if
-    // possible for best performance.  If there's space in the response
-    // buffer for this actual response length, add it to buffer.  If not,
-    // flush the buffer to trigger a packet send, and then add it to
-    // buffer.
-    //
-    // For now just write the single response. This may result in lower performance.
-
     len += sizeof(*header);
     int ret = socket_write(packet, len);
     if(ret < 0)
@@ -333,29 +306,6 @@ int process_dap_requests(void)
         if(ret < 0)
             return ret;
     }
-
-#if 0
-    // Send all responses at once.
-    if(response_idx > 0) {
-        int nbytes = response_idx * sizeof(responses[0]);
-        void* ptr = responses;
-
-        while(nbytes > 0) {
-            LOG_DEBUG("Sending responses, %d bytes", nbytes);
-            int ret = socket_write_(ptr, nbytes);
-            LOG_DEBUG_IO("socket_write returned %d", ret);
-            if(ret < 0) {
-                // Error. Discard the responses.
-                response_idx = 0;
-                return ret;
-            }
-            nbytes -= ret;
-            ptr += ret;
-        }
-        response_idx = 0;
-    }
-    return ret_cmd;
-#endif
 }
 
 // ----------------------------------------------------------------------------
