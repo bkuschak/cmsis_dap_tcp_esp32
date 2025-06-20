@@ -1,7 +1,0 @@
-This was exported from the Firmware directory of:
-https://github.com/ARM-software/CMSIS-DAP
-commit 1fd47bed772ea40923472c90dfe11516e76033ee (HEAD -> main, tag: v2.1.2, origin/main, origin/HEAD)
-
-DAP_config.h was then modified to support the ESP32 GPIO.
-
-
