@@ -44,12 +44,12 @@
 // GPIO pins used on the board.
 // Change these if necessary to match your hardware.
 #if defined(BOARD_XIAO_ESP32C6)
-#define GPIO_SWCLK_TCK      GPIO_NUM_21   // D3  TODO GPIO19
-#define GPIO_SWDIO_TMS      GPIO_NUM_22   // D4  TODO GPIO18 and GPIO20
-#define GPIO_TDO            GPIO_NUM_23   // D4  TODO GPIO21
-#define GPIO_TDI            GPIO_NUM_22   // D4  TODO GPIO22
-#define GPIO_NTRST          GPIO_NUM_22   // D4  TODO GPIO23
-#define GPIO_NRESET         GPIO_NUM_16   // D6
+#define GPIO_SWCLK_TCK      GPIO_NUM_19   // D8 GPIO19
+#define GPIO_SWDIO_TMS      GPIO_NUM_20   // D9 GPIO20
+#define GPIO_TDI            GPIO_NUM_22   // D4 GPIO22
+#define GPIO_TDO            GPIO_NUM_23   // D5 GPIO23
+#define GPIO_NTRST          GPIO_NUM_21   // D3 GPIO21
+#define GPIO_NRESET         GPIO_NUM_18   // D10 GPIO18
 #define GPIO_LED            GPIO_NUM_15
 
 // TODO - define other boards here...
@@ -205,7 +205,7 @@ __STATIC_INLINE uint8_t DAP_GetVendorString (char *str)
 */
 __STATIC_INLINE uint8_t DAP_GetProductString (char *str)
 {
-    const char *vendor = "ESP32-C6 CMSIS_DAP_TCP device";
+    const char *vendor = "ESP32-C6 CMSIS-DAP-TCP device";
     int maxlen = 60;
     strncpy(str, vendor, maxlen);
     str[maxlen-1] = '\0';
@@ -370,18 +370,16 @@ __STATIC_INLINE void PORT_JTAG_SETUP (void)
     gpio_set_level(GPIO_SWCLK_TCK, 1);
     gpio_set_level(GPIO_SWDIO_TMS, 1);
     gpio_set_level(GPIO_TDI, 1);
-    gpio_set_level(GPIO_NTRST, 1);
     gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
     gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_OUTPUT);
     gpio_set_direction(GPIO_TDI, GPIO_MODE_OUTPUT);
-    gpio_set_direction(GPIO_NTRST, GPIO_MODE_OUTPUT);
     gpio_set_direction(GPIO_TDO, GPIO_MODE_INPUT);
 
-    // NTRST as input with pullup, until commanded otherwise.
+    // NTRST as input with pullup.
     gpio_pullup_en(GPIO_NTRST);
     gpio_set_direction(GPIO_NTRST, GPIO_MODE_INPUT);
 
-    // NRESET (SRST) as input with pullup, until commanded otherwise.
+    // NRESET (SRST) as input with pullup.
     gpio_pullup_en(GPIO_NRESET);
     gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
 
@@ -426,6 +424,9 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
     // LED off (active low)
     gpio_set_level(GPIO_LED, 1);
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+
+    // TODO consider setting TDI, NTRST as inputs with pullup
+    // so they don't float.
 }
 
 /** Disable JTAG/SWD I/O Pins.
@@ -584,10 +585,15 @@ __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 */
 __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 {
-    if(bit & 1)
-        GPIO.out_w1ts.val = 1<<GPIO_NTRST;
-    else
-        GPIO.out_w1tc.val = 1<<GPIO_NTRST;
+    if(bit & 1) {
+        // Set to input (pullup was enabled).
+        GPIO.enable_w1tc.enable_w1tc = 1<<GPIO_NTRST;
+    }
+    else {
+        // Drive low.
+        GPIO.out_w1tc.out_w1tc = 1<<GPIO_NTRST;
+        GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_NTRST;
+    }
 }
 
 // nRESET Pin I/O------------------------------------------
@@ -608,11 +614,13 @@ __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN  (void)
 __STATIC_FORCEINLINE void     PIN_nRESET_OUT (uint32_t bit)
 {
     if(bit & 1) {
-        GPIO.out_w1tc.out_w1tc = 1<<GPIO_NRESET;
-        GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_NRESET;
+        // Set to input (pullup was enabled).
+        GPIO.enable_w1tc.enable_w1tc = 1<<GPIO_NRESET;
     }
     else {
-        GPIO.enable_w1tc.enable_w1tc = 1<<GPIO_NRESET;
+        // Drive low.
+        GPIO.out_w1tc.out_w1tc = 1<<GPIO_NRESET;
+        GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_NRESET;
     }
 }
 
