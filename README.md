@@ -15,8 +15,8 @@ board.
 
 ![diagram](img/cmsis_dap_tcp_diagram.svg)
 
-- Tested with the XIAO ESP32C6 development board as the programmer, and STM32
-  Blue Pill as the target.
+- Tested with the XIAO ESP32C6 development board as the programmer, and
+  STM32F103 Blue Pill and Nucleo STM32F401RE as the targets.
 - Either JTAG mode or SWD mode can be used to program the target. 2 GPIO are
   needed for SWD, or a minimum of 4 GPIO for JTAG.
 - An optional GPIO pin can be used to drive the NRST# (SRST) signal, but this
@@ -24,9 +24,11 @@ board.
 - In JTAG mode, an optional GPIO pin can be used to drive the TRST signal, but
   this is typically not required.
 - A separate GPIO may be used to control an activity LED.
-- Typical performance: flashing a 64KB firmware image to the STM32F103
-  completes in about 6 seconds, including erase, program, and verify. (The same
-  operation using remote_bitbang takes more than 20 minutes).
+- Typical performance: flashing a 512 KB firmware image to the STM32F401RE
+  completes in about 13.4 seconds, including erase, program, and verify (with 4
+  to 8 seconds of that time used for flash erasure). The Blue Pill takes about
+  6 seconds for a 64KB image. Performance also depends on the quality of your
+  WiFi network.
 
 ![pinout](img/xiao_esp32c6_pinout.png)
 
@@ -42,7 +44,7 @@ commit 1fd47bed772ea40923472c90dfe11516e76033ee (HEAD -> main, tag: v2.1.2, orig
 The software has some limitations:
 
 - CMSIS-DAP UART and SWO are currently unsupported.
-- Maximum clock rate is XXXX KHz (when ESP32 configured for 160 MHz / 80 MHz).
+- Maximum clock rate is 1000 KHz (when ESP32 configured for 160 MHz / 80 MHz).
 - The WiFi credentials are hardcoded. The software must be rebuilt if you want
   to change them.
 
@@ -77,8 +79,16 @@ The cmsis_dap_tcp driver is committed to the OpenOCD Gerrit repo, change number
 Until this change is merged into the main branch of OpenOCD, get it like this:
 
 ```
-git clone git://git.code.sf.net/p/openocd/code
-git review -d 8973
+git clone git://git.code.sf.net/p/openocd/code openocd
+cd openocd
+git fetch https://review.openocd.org/openocd refs/changes/73/8973/9
+git checkout FETCH_HEAD
+```
+
+You should see:
+
+```
+HEAD is now at d91d79d7e jtag/drivers/cmsis_dap: add new backend cmsis_dap_tcp
 ```
 
 Configure and build OpenOCD as usual, while enabling the cmsis_dap_tcp driver:
@@ -95,7 +105,7 @@ your ESP32's IP address:
 adapter driver cmsis-dap
 cmsis-dap backend tcp
 cmsis-dap tcp host 192.168.1.4
-cmsis-dap tcp dap_port 4441
+cmsis-dap tcp port 4441
 transport select swd
 reset_config none
 ```
@@ -140,13 +150,12 @@ the following line. This will impact performance.
 #define DEBUG_PRINTING
 ```
 
-A single SWD 32-bit transfer completes in about FIXME microseconds, with an
-SWCLK clock rate of approximately FIXME. Yellow is SWCLK. Red is SWDIO.
+A single SWD 32-bit transfer completes in about 45 microseconds, with an
+SWCLK clock rate of approximately 1 MHz. Yellow is SWCLK. Green is SWDIO.
+
+(TODO: the scope available at the time to make these measurements was very
+limited. Redo these measurements with a better scope).
 
 ![scopeshot1](img/scopeshot1.png)
-
-A set of three back-to-back transfers complete in about FIXME microseconds. The
-following scope capture shows a bit better than FIXME utilization of the SWD
-link.
 
 ![scopeshot1](img/scopeshot2.png)
