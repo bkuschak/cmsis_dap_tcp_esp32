@@ -14,7 +14,7 @@
  *     adapter driver cmsis-dap
  *     cmsis-dap backend tcp
  *     cmsis-dap tcp host 192.168.1.4
- *     cmsis-dap tcp dap_port 4441
+ *     cmsis-dap tcp port 4441
  *
  * Programming a target can then be done using something like this:
  *
@@ -27,7 +27,7 @@
  *
  * Status:
  * - DAP uses tcp port 4441 by default.
- * - SWD mode only. JTAG support may be added in the future.
+ * - Supports SWD, JTAG, NRESET, TRST.
  * - Target console serial port currently unsupported.
  * - SWO trace port currently unsupported.
  *

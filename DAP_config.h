@@ -30,7 +30,12 @@
 
 /*
  * Modified to support XIAO-ESP32-C6 board. See defines below for the pinout.
- * Currently supports SWD mode and NRESET only.
+ * Currently supports SWD, JTAG, NRESET, and TRST.
+ *
+ * IO_PORT_WRITE_CYCLES and DELAY_SLOW_CYCLES were empirically tuned on
+ * ESP32-C6 @ 160 MHz / 80 MHz to achieve SWD clock rates that roughly match
+ * the requested 'adapter speed <khz>'. These may need adjustment for other
+ * devices.
  */
 
 #include <driver/gpio.h>
@@ -92,7 +97,10 @@ This information includes:
 /// require 2 processor cycles for a I/O Port Write operation.  If the Debug Unit uses
 /// a Cortex-M0+ processor with high-speed peripheral I/O only 1 processor cycle might be
 /// required.
-#define IO_PORT_WRITE_CYCLES    12U              ///< I/O Cycles: 12 - TODO is this right?
+#define IO_PORT_WRITE_CYCLES    72U             ///< I/O Cycles. Estimate for ESP32-C6.
+
+// Added for ESP32-C6.
+#define DELAY_SLOW_CYCLES       5U              // Number of cycles for one iteration.
 
 /// Indicate that Serial Wire Debug (SWD) communication mode is available at the Debug Access Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
@@ -113,7 +121,9 @@ This information includes:
 /// Default communication speed on the Debug Access Port for SWD and JTAG mode.
 /// Used to initialize the default SWD/JTAG clock frequency.
 /// The command \ref DAP_SWJ_Clock can be used to overwrite this default setting.
-#define DAP_DEFAULT_SWJ_CLOCK   1000000U        ///< Default SWD/JTAG clock frequency in Hz.
+/// Choose the fastest clock that we can achieve in the PIN_DELAY_FAST case,
+/// which is just under 1200 KHz for the ESP32-C6 @ 160 MHz.
+#define DAP_DEFAULT_SWJ_CLOCK   1200000U        ///< Default SWD/JTAG clock frequency in Hz.
 
 /// Maximum Package Size for Command and Response data.
 /// This configuration settings is used to optimize the communication performance with the
