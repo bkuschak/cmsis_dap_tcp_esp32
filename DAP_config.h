@@ -39,6 +39,7 @@
  */
 
 #include <driver/gpio.h>
+#include <hal/gpio_ll.h>
 #include <esp_cpu.h>
 #include <esp_mac.h>
 #include <soc/gpio_struct.h>
@@ -187,6 +188,9 @@ This information includes:
 #define TARGET_DEVICE_NAME      "Cortex-M"      ///< String indicating the Target Device
 #define TARGET_BOARD_VENDOR     "Arm"           ///< String indicating the Board Vendor
 #define TARGET_BOARD_NAME       "Arm board"     ///< String indicating the Board Name
+
+// Pointer to the GPIO port used for SWD, JTAG, and RESET.
+static gpio_dev_t *const gpio_dev_ptr = &GPIO;
 
 #if TARGET_FIXED != 0
 #include <string.h>
@@ -424,13 +428,6 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
     gpio_pullup_en(GPIO_SWDIO_TMS);
     gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_INPUT);
 
-    // SWD as input.
-    GPIO.enable_w1tc.enable_w1tc = (1<<GPIO_SWDIO_TMS);
-
-    // SWCLK as output low.
-    GPIO.out_w1tc.val = 1<<GPIO_SWCLK_TCK;
-    GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_SWCLK_TCK;
-
     // LED off (active low)
     gpio_set_level(GPIO_LED, 1);
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
@@ -461,7 +458,7 @@ __STATIC_INLINE void PORT_OFF (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWCLK_TCK_IN  (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_SWCLK_TCK)) ? 1 : 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_SWCLK_TCK);
 }
 
 /** SWCLK/TCK I/O pin: Set Output to High.
@@ -469,7 +466,7 @@ Set the SWCLK/TCK DAP hardware I/O pin to high level.
 */
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_SET (void)
 {
-    GPIO.out_w1ts.val = 1<<GPIO_SWCLK_TCK;
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_SWCLK_TCK, 1);
 }
 
 /** SWCLK/TCK I/O pin: Set Output to Low.
@@ -477,7 +474,7 @@ Set the SWCLK/TCK DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void)
 {
-    GPIO.out_w1tc.val = 1<<GPIO_SWCLK_TCK;
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_SWCLK_TCK, 0);
 }
 
 
@@ -488,7 +485,7 @@ __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_TMS_IN  (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_SWDIO_TMS)) ? 1 : 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_SWDIO_TMS);
 }
 
 /** SWDIO/TMS I/O pin: Set Output to High.
@@ -496,7 +493,7 @@ Set the SWDIO/TMS DAP hardware I/O pin to high level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_SET (void)
 {
-    GPIO.out_w1ts.val = 1<<GPIO_SWDIO_TMS;
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, 1);
 }
 
 /** SWDIO/TMS I/O pin: Set Output to Low.
@@ -504,7 +501,7 @@ Set the SWDIO/TMS DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_CLR (void)
 {
-    GPIO.out_w1tc.val = 1<<GPIO_SWDIO_TMS;
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, 0);
 }
 
 /** SWDIO I/O pin: Get Input (used in SWD mode only).
@@ -512,7 +509,7 @@ __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_CLR (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_SWDIO_TMS)) ? 1 : 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_SWDIO_TMS);
 }
 
 /** SWDIO I/O pin: Set Output (used in SWD mode only).
@@ -520,10 +517,7 @@ __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void)
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT     (uint32_t bit)
 {
-    if(bit & 1)
-        GPIO.out_w1ts.val = 1<<GPIO_SWDIO_TMS;
-    else
-        GPIO.out_w1tc.val = 1<<GPIO_SWDIO_TMS;
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, bit & 1);
 }
 
 /** SWDIO I/O pin: Switch to Output mode (used in SWD mode only).
@@ -532,7 +526,7 @@ called prior \ref PIN_SWDIO_OUT function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_ENABLE  (void)
 {
-    GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_SWDIO_TMS;
+    gpio_ll_output_enable(gpio_dev_ptr, GPIO_SWDIO_TMS);
 }
 
 /** SWDIO I/O pin: Switch to Input mode (used in SWD mode only).
@@ -541,7 +535,7 @@ called prior \ref PIN_SWDIO_IN function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 {
-    GPIO.enable_w1tc.enable_w1tc = 1<<GPIO_SWDIO_TMS;
+    gpio_ll_output_disable(gpio_dev_ptr, GPIO_SWDIO_TMS);
 }
 
 
@@ -552,7 +546,7 @@ __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_TDI_IN  (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_TDI)) ? 1 : 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_TDI);
 }
 
 /** TDI I/O pin: Set Output.
@@ -560,10 +554,7 @@ __STATIC_FORCEINLINE uint32_t PIN_TDI_IN  (void)
 */
 __STATIC_FORCEINLINE void     PIN_TDI_OUT (uint32_t bit)
 {
-    if(bit & 1)
-        GPIO.out_w1ts.val = 1<<GPIO_TDI;
-    else
-        GPIO.out_w1tc.val = 1<<GPIO_TDI;
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_TDI, bit & 1);
 }
 
 
@@ -574,7 +565,7 @@ __STATIC_FORCEINLINE void     PIN_TDI_OUT (uint32_t bit)
 */
 __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_TDO)) ? 1 : 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_TDO);
 }
 
 
@@ -585,7 +576,7 @@ __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_NTRST)) ? 1 : 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_NTRST);
 }
 
 /** nTRST I/O pin: Set Output.
@@ -597,12 +588,12 @@ __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 {
     if(bit & 1) {
         // Set to input (pullup was enabled).
-        GPIO.enable_w1tc.enable_w1tc = 1<<GPIO_NTRST;
+        gpio_ll_output_disable(gpio_dev_ptr, GPIO_NTRST);
     }
     else {
         // Drive low.
-        GPIO.out_w1tc.out_w1tc = 1<<GPIO_NTRST;
-        GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_NTRST;
+        gpio_ll_set_level(gpio_dev_ptr, GPIO_NTRST, 0);
+        gpio_ll_output_enable(gpio_dev_ptr, GPIO_NTRST);
     }
 }
 
@@ -613,7 +604,7 @@ __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 */
 __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN  (void)
 {
-    return (GPIO.in.in_data_next & (1<<GPIO_NRESET)) ? 1 : 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_NRESET);
 }
 
 /** nRESET I/O pin: Set Output.
@@ -625,12 +616,12 @@ __STATIC_FORCEINLINE void     PIN_nRESET_OUT (uint32_t bit)
 {
     if(bit & 1) {
         // Set to input (pullup was enabled).
-        GPIO.enable_w1tc.enable_w1tc = 1<<GPIO_NRESET;
+        gpio_ll_output_disable(gpio_dev_ptr, GPIO_NRESET);
     }
     else {
         // Drive low.
-        GPIO.out_w1tc.out_w1tc = 1<<GPIO_NRESET;
-        GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_NRESET;
+        gpio_ll_set_level(gpio_dev_ptr, GPIO_NRESET, 0);
+        gpio_ll_output_enable(gpio_dev_ptr, GPIO_NRESET);
     }
 }
 
@@ -657,10 +648,8 @@ It is recommended to provide the following LEDs for status indication:
 */
 __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit)
 {
-    if(bit & 1)
-        GPIO.out_w1tc.out_w1tc = 1<<GPIO_LED; /* active low */
-    else
-        GPIO.out_w1ts.out_w1ts = 1<<GPIO_LED;
+    // LED is active low.
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, !bit);
 }
 
 /** Debug Unit: Set status Target Running LED.
