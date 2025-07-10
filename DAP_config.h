@@ -389,6 +389,13 @@ __STATIC_INLINE void PORT_JTAG_SETUP (void)
     gpio_set_direction(GPIO_TDI, GPIO_MODE_OUTPUT);
     gpio_set_direction(GPIO_TDO, GPIO_MODE_INPUT);
 
+    // Set weakest drive strength to improve signal integrity.
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_CAP_0);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_CAP_0);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_TDI, GPIO_DRIVE_CAP_0);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NTRST, GPIO_DRIVE_CAP_0);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
+
     // NTRST as input with pullup.
     gpio_pullup_en(GPIO_NTRST);
     gpio_set_direction(GPIO_NTRST, GPIO_MODE_INPUT);
@@ -427,6 +434,11 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
     // SWD as input.
     gpio_pullup_en(GPIO_SWDIO_TMS);
     gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_INPUT);
+
+    // Set weakest drive strength to improve signal integrity.
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_CAP_0);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_CAP_0);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
 
     // LED off (active low)
     gpio_set_level(GPIO_LED, 1);
