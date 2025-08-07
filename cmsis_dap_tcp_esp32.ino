@@ -126,7 +126,7 @@ static bool check_wifi_callback(void* arg)
 void setup(void)
 {
   // Init SWD port pins.
-  PORT_SWD_SETUP();
+  PORT_OFF();
 
   // Initialize USB serial port for debugging.
   Serial.begin(115200);

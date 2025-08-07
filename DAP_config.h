@@ -416,13 +416,6 @@ Configures the DAP Hardware I/O pins for Serial Wire Debug (SWD) mode:
 */
 __STATIC_INLINE void PORT_SWD_SETUP (void)
 {
-    // Use the slower gpio_ functions for the initial setup. Later, use direct
-    // register access later for toggling the pins quickly.
-    gpio_reset_pin(GPIO_SWCLK_TCK);
-    gpio_reset_pin(GPIO_SWDIO_TMS);
-    gpio_reset_pin(GPIO_NRESET);
-    gpio_reset_pin(GPIO_LED);
-
     // SRST as input with pullup, until commanded otherwise.
     gpio_pullup_en(GPIO_NRESET);
     gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
@@ -431,9 +424,10 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
     gpio_set_level(GPIO_SWCLK_TCK, 0);
     gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
 
-    // SWD as input.
+    // SWD as output low.
     gpio_pullup_en(GPIO_SWDIO_TMS);
-    gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_INPUT);
+    gpio_set_level(GPIO_SWDIO_TMS, 0);
+    gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_OUTPUT);
 
     // Set weakest drive strength to improve signal integrity.
     gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_CAP_0);
@@ -460,6 +454,7 @@ __STATIC_INLINE void PORT_OFF (void)
     gpio_reset_pin(GPIO_TDO);
     gpio_reset_pin(GPIO_NTRST);
     gpio_reset_pin(GPIO_NRESET);
+    gpio_reset_pin(GPIO_LED);
 }
 
 
@@ -548,6 +543,7 @@ called prior \ref PIN_SWDIO_IN function calls.
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 {
     gpio_ll_output_disable(gpio_dev_ptr, GPIO_SWDIO_TMS);
+    gpio_ll_input_enable(gpio_dev_ptr, GPIO_SWDIO_TMS);
 }
 
 
