@@ -243,3 +243,56 @@ downloaded 98304 bytes in 1.092678s (87.858 KiB/s)
 > dump_image /dev/null 0x20000000 0x18000
 dumped 98304 bytes in 1.469766s (65.317 KiB/s)
 ```
+
+Programming and verifying a 512 KB flash image takes about 20 seconds:
+
+```
+time ./src/openocd \
+    --search tcl \
+    -c "debug_level 2" \
+    -c "adapter driver cmsis-dap" \
+    -c "transport select swd" \
+    -c "cmsis-dap backend tcp" \
+    -c "cmsis-dap tcp host 192.168.1.107" \
+    -c "cmsis-dap tcp port 4441" \
+    -f "tcl/target/stm32f4x.cfg" \
+    -c "reset_config none" \
+    -c "program ${ELF} verify reset exit"
+
+Open On-Chip Debugger 0.12.0+dev-01114-gbf01f1089 (2025-08-07-11:52)
+Licensed under GNU GPL v2
+For bug reports, read
+	http://openocd.org/doc/doxygen/bugs.html
+none separate
+Info : CMSIS-DAP: Connecting to 192.168.1.107:4441 using TCP backend
+Info : CMSIS-DAP: SWD supported
+Info : CMSIS-DAP: JTAG supported
+Info : CMSIS-DAP: Atomic commands supported
+Info : CMSIS-DAP: Test domain timer supported
+Info : CMSIS-DAP: FW Version = 2.1.2
+Info : CMSIS-DAP: Serial# = E4B323B60EB4
+Info : CMSIS-DAP: Interface Initialised (SWD)
+Info : SWCLK/TCK = 0 SWDIO/TMS = 0 TDI = 0 TDO = 0 nTRST = 0 nRESET = 1
+Info : CMSIS-DAP: Interface ready
+Info : clock speed 2000 kHz
+Info : SWD DPIDR 0x2ba01477
+Info : [stm32f4x.cpu] Cortex-M4 r0p1 processor detected
+Info : [stm32f4x.cpu] target has 6 breakpoints, 4 watchpoints
+Info : [stm32f4x.cpu] Examination succeed
+Info : [stm32f4x.cpu] starting gdb server on 3333
+Info : Listening on port 3333 for gdb connections
+[stm32f4x.cpu] halted due to debug-request, current mode: Thread 
+xPSR: 0x01000000 pc: 0x08000734 msp: 0x20018000
+** Programming Started **
+Info : device id = 0x10016433
+Info : flash size = 512 KiB
+** Programming Finished **
+** Verify Started **
+** Verified OK **
+** Resetting Target **
+shutdown command invoked
+
+real	0m19.242s
+user	0m0.052s
+sys		0m0.155s
+```
