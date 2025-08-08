@@ -1152,6 +1152,14 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
+# CMSIS-DAP board configuration
+#
+CONFIG_ESP_BOARD_XIAO_ESP32C6=y
+# CONFIG_ESP_BOARD_ESP32S3_DEVKITC_1 is not set
+# CONFIG_ESP_BOARD_UNKNOWN is not set
+# end of CMSIS-DAP board configuration
+
+#
 # CMSIS-DAP TCP WiFi configuration
 #
 # default:

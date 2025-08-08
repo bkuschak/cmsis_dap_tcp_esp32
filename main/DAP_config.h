@@ -43,25 +43,35 @@
 #include <esp_cpu.h>
 #include <esp_mac.h>
 #include <soc/gpio_struct.h>
+#include <string.h>
 
-// Define a supported board. See below.
-#define BOARD_XIAO_ESP32C6
+// Define the GPIO pins used on the board.
 
-// GPIO pins used on the board.
-// Change these if necessary to match your hardware.
-#if defined(BOARD_XIAO_ESP32C6)
-#define GPIO_SWCLK_TCK      GPIO_NUM_19   // D8 GPIO19
-#define GPIO_SWDIO_TMS      GPIO_NUM_20   // D9 GPIO20
-#define GPIO_TDI            GPIO_NUM_22   // D4 GPIO22
-#define GPIO_TDO            GPIO_NUM_23   // D5 GPIO23
-#define GPIO_NTRST          GPIO_NUM_21   // D3 GPIO21
-#define GPIO_NRESET         GPIO_NUM_18   // D10 GPIO18
-#define GPIO_LED            GPIO_NUM_15
+#if defined(CONFIG_ESP_BOARD_XIAO_ESP32C6)
+#define GPIO_SWCLK_TCK      GPIO_NUM_19     // D8 GPIO19
+#define GPIO_SWDIO_TMS      GPIO_NUM_20     // D9 GPIO20
+#define GPIO_TDI            GPIO_NUM_22     // D4 GPIO22
+#define GPIO_TDO            GPIO_NUM_23     // D5 GPIO23
+#define GPIO_NTRST          GPIO_NUM_21     // D3 GPIO21
+#define GPIO_NRESET         GPIO_NUM_18     // D10 GPIO18
+#define GPIO_LED            GPIO_NUM_15     // onboard LED
+#define CPU_CLOCK           160000000U      ///< Specifies the CPU Clock in Hz.
 
-// TODO - define other boards here...
+#elif defined(CONFIG_ESP_BOARD_ESP32S3_DEVKITC_1)
+// These pins are selected to be contiguous with the 5V and GND pins.
+#define GPIO_SWCLK_TCK      GPIO_NUM_14     // pin 20
+#define GPIO_SWDIO_TMS      GPIO_NUM_13     // pin 19
+#define GPIO_TDI            GPIO_NUM_10     // pin 16
+#define GPIO_TDO            GPIO_NUM_9      // pin 15
+#define GPIO_NTRST          GPIO_NUM_11     // pin 17
+#define GPIO_NRESET         GPIO_NUM_12     // pin 18
+#undef  GPIO_LED                            // No simple LED on board
+#define CPU_CLOCK           240000000U      ///< Specifies the CPU Clock in Hz.
+
+// Define other supported boards here...
 
 #else
-#error "Board not defined!"
+#error "CONFIG_ESP_BOARD_ is not defined. Run menuconfig and select a supported board."
 #endif
 
 //**************************************************************************************************
@@ -84,7 +94,8 @@ This information includes:
 
 /// Processor Clock of the Cortex-M MCU used in the Debug Unit.
 /// This value is used to calculate the SWD/JTAG clock speed.
-#define CPU_CLOCK               160000000U      ///< Specifies the CPU Clock in Hz.
+/// Board-specific - defined above.
+//#define CPU_CLOCK               160000000U    ///< Specifies the CPU Clock in Hz.
 
 /// Number of processor cycles for I/O Port write operations.
 /// This value is used to calculate the SWD/JTAG clock speed that is generated with I/O
@@ -373,7 +384,9 @@ __STATIC_INLINE void PORT_JTAG_SETUP (void)
     gpio_reset_pin(GPIO_TDO);
     gpio_reset_pin(GPIO_NTRST);
     gpio_reset_pin(GPIO_NRESET);
+#ifdef GPIO_LED
     gpio_reset_pin(GPIO_LED);
+#endif
 
     gpio_set_level(GPIO_SWCLK_TCK, 1);
     gpio_set_level(GPIO_SWDIO_TMS, 1);
@@ -398,9 +411,11 @@ __STATIC_INLINE void PORT_JTAG_SETUP (void)
     gpio_pullup_en(GPIO_NRESET);
     gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
 
+#ifdef GPIO_LED
     // LED off (active low)
     gpio_set_level(GPIO_LED, 1);
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+#endif
 }
 
 /** Setup SWD I/O pins: SWCLK, SWDIO, and nRESET.
@@ -428,9 +443,11 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
     gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_CAP_0);
     gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
 
+#ifdef GPIO_LED
     // LED off (active low)
     gpio_set_level(GPIO_LED, 1);
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+#endif
 
     // TODO consider setting TDI, NTRST as inputs with pullup
     // so they don't float.
@@ -448,7 +465,9 @@ __STATIC_INLINE void PORT_OFF (void)
     gpio_reset_pin(GPIO_TDO);
     gpio_reset_pin(GPIO_NTRST);
     gpio_reset_pin(GPIO_NRESET);
+#ifdef GPIO_LED
     gpio_reset_pin(GPIO_LED);
+#endif
 }
 
 
@@ -650,8 +669,11 @@ It is recommended to provide the following LEDs for status indication:
 */
 __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit)
 {
+#ifdef GPIO_LED
     // LED is active low.
+    gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
     gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, !bit);
+#endif
 }
 
 /** Debug Unit: Set status Target Running LED.
@@ -712,9 +734,11 @@ __STATIC_INLINE void DAP_SETUP (void)
     gpio_reset_pin(GPIO_NRESET);
     gpio_pullup_en(GPIO_NRESET);
 
+#ifdef GPIO_LED
     // LED off (active low)
     gpio_set_level(GPIO_LED, 1);
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+#endif
 }
 
 /** Reset Target Device with custom specific I/O pin or command sequence.

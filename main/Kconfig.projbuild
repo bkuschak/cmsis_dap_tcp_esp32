@@ -1,3 +1,21 @@
+menu "CMSIS-DAP board configuration"
+
+    choice ESP_BOARD
+        prompt "Board selection"
+        default ESP_BOARD_UNKNOWN
+        help
+            Select a supported board for the build. The board-specific pin assignments are defined in DAP_config.h
+
+        config ESP_BOARD_XIAO_ESP32C6
+            bool "Xiao ESP32-C6"
+        config ESP_BOARD_ESP32S3_DEVKITC_1
+            bool "Espressif ESP32-S3-DevKitC-1"
+        config ESP_BOARD_UNKNOWN
+            bool "Unknown board. Will cause build to fail."
+    endchoice
+
+endmenu
+
 menu "CMSIS-DAP TCP WiFi configuration"
 
     config ESP_WIFI_SSID
