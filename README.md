@@ -1,4 +1,4 @@
-## cmsis_dap_tcp for OpenOCD
+# cmsis_dap_tcp for OpenOCD
 
 OpenOCD supports the CMSIS-DAP protocol to communicate with a JTAG / SWD
 programmer. Typically this is a local programmer with a USB connection. With
@@ -39,7 +39,7 @@ modified to support the ESP32 GPIO.
 commit 1fd47bed772ea40923472c90dfe11516e76033ee (HEAD -> main, tag: v2.1.2, origin/main, origin/HEAD)
 ```
 
-## Limitations
+# Limitations
 
 The software has some limitations:
 
@@ -48,7 +48,7 @@ The software has some limitations:
 - The WiFi credentials are hardcoded. The software must be rebuilt if you want
   to change them.
 
-## Building
+# Building and Flashing the Firmware
 
 This code requires the ESP-IDF build tools. Refer to the official
 [installation guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation)
@@ -59,40 +59,30 @@ First activate your ESP-IDF virtual environment:
 . $HOME/esp/esp-idf/export.sh
 ```
 
-Using the commands below, select your target CPU and run menuconfig. In menuconfig select the "CMSIS-DAP
-TCP WiFi configuration" page and enter your WiFi SSID and password. If you are
-not using WPA2, you might also need to set the Auth Threshold setting
-appropriately. Quit menuconfig and build the code. Beware that the sdkconfig
-file contains your WiFi password. For security, do not commit that change to
-git.
+The code  supports multiple different boards, and each one has its own 
+```sdkconfig``` file. 
+
+* To build for Xiao ESP32-C6 board:
+	```
+	cp sdkconfig.xiao_esp32c6 sdkconfig
+	```
+
+* To build for Espressif ESP32-S3-DevKitC-1 board:
+	```
+	cp sdkconfig.esp32s3_devkitc_1 sdkconfig
+	```
+
+Then run menuconfig. Goto the page “CMSIS-DAP TCP WiFi configuration” and set the
+WiFi SSID and password for your network. (If you are not using WPA2, you might 
+also need to adjust Auth Threshold setting). Connect the board via USB, build 
+the firmware, and flash it onto the board:
 
 ```
-idf.py set-target esp32c6
-idf.py menuconfig
-idf.py build
+idf.py fullclean menuconfig
+idf.py build flash
 ```
 
-Assuming the build completed successfully, flash it onto your board. You 
-can run the serial monitor to view the console output. (Exit the serial 
-monitor using Ctrl+]).
-
-```
-idf.py flash
-idf.py monitor
-```
-
-Once the ESP32 has connected to WiFi and obtained an IP address by DHCP, you
-can then run OpenOCD.
-
-This code was tested with the following:
-
-- Host: MacOS
-- Board: Xiao ESP32-C6
-- CPU Frequency: 160 MHz
-- Flash Frequency: 80 MHz
-- Flash mode: QIO
-
-## Building / Running OpenOCD
+# Building and Running OpenOCD
 
 The cmsis_dap_tcp driver is committed to the OpenOCD Gerrit repo, change number
 8973. Refer to the [source code](https://review.openocd.org/c/openocd/+/8973).
@@ -118,7 +108,7 @@ Configure and build OpenOCD as usual, while enabling the cmsis_dap_tcp driver:
 ```
 
 An OpenOCD configuration file has been provided for convenience.
-Update your ```tcl/interface/cmsis_dap_tcp.cfg``` configuration file to point to
+Edit your ```tcl/interface/cmsis_dap_tcp.cfg``` configuration file to point to
 your ESP32's IP address:
 
 ```
@@ -130,9 +120,10 @@ transport select swd
 reset_config none
 ```
 
-To flash an STM32 target, run the following command from your OpenOCD build
-directory.  Replace ```firmware.elf``` with the name of your ELF file, and
-```stm32f1x.cfg``` with the appropriate file for your microcontroller.
+To flash an STM32 target, for example, run the following command from your 
+OpenOCD build directory.  Replace ```firmware.elf``` with the name of your 
+ELF file, and ```stm32f1x.cfg``` with the appropriate file for your 
+microcontroller.
 
 ```
 ./src/openocd --search tcl \
@@ -141,14 +132,24 @@ directory.  Replace ```firmware.elf``` with the name of your ELF file, and
               -c "program firmware.elf verify reset exit"
 ```
 
-## Operation
+# Operation
 
 After power-on, the ESP32 will attempt to connect to the WiFi that was
 configured using menuconfig. It will then begin listening for an incoming
 connection from OpenOCD. The ESP32 will print status and error messages to the
-console, which can be observed using ```idf.py monitor```. A message is printed
-whenever the OpenOCD client connects or disconnects. Only one active connection
-is allowed.
+console, including the WiFi connection status and IP address. A message is 
+printed whenever the OpenOCD client connects or disconnects. (Only one active 
+client is allowed).
+
+You can run the serial monitor to view the console output. To exit the serial 
+monitor use ```Ctrl+]```.
+
+```
+idf.py monitor
+```
+
+Once the ESP32 has connected to WiFi and obtained an IP address by DHCP, you
+can then run OpenOCD. You should see something like this from the ESP32:
 
 ```
 CMSIS-DAP TCP running on ESP32
@@ -160,8 +161,6 @@ Attempting to connect to WiFi SSID: 'SomeWifiRouter'
 Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -75 dBm
 IP address: 192.168.1.107
 cmsis_dap_tcp server listening on port 4441.
-Client connected.
-Client disconnected.
 ```
 
 Additional debugging messages may be enabled by editing
@@ -171,7 +170,7 @@ impact performance.
 #define DEBUG_PRINTING
 ```
 
-## Performance
+# Performance
 
 A single SWD 32-bit transfer completes in about 45 microseconds, with an
 SWCLK clock rate of approximately 1 MHz. Yellow is SWCLK. Green is SWDIO.
@@ -228,6 +227,8 @@ Info : [stm32f4x.cpu] starting gdb server on 3333
 Info : Listening on port 3333 for gdb connections
 Info : accepting 'telnet' connection on tcp/4444
 ```
+
+## Using ESP32-C6 @ 160 MHz
 
 Xiao ESP32C6 running at 160 MHz is the programmer board. Connecting to an 
 STM32F401RE target and reading and writing SRAM:
@@ -295,4 +296,22 @@ shutdown command invoked
 real	0m19.242s
 user	0m0.052s
 sys		0m0.155s
+```
+
+## Using ESP32-S3 @ 240 MHz
+
+Performance is higher on ESP32-S3. The throughput seems more variable 
+on each run, but here are some representative numbers for writing and 
+reading SRAM:
+
+```
+% telnet localhost 4444
+> poll off
+                      
+> load_image ./random_96kb.bin 0x20000000
+98304 bytes written at address 0x20000000
+downloaded 98304 bytes in 0.489488s (196.123 KiB/s)
+
+> dump_image /dev/null 0x20000000 0x18000
+dumped 98304 bytes in 0.832846s (115.267 KiB/s)
 ```
