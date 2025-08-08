@@ -45,28 +45,32 @@
 #include <soc/gpio_struct.h>
 #include <string.h>
 
-// Define the GPIO pins used on the board.
+// Board-specific defines.
 
 #if defined(CONFIG_ESP_BOARD_XIAO_ESP32C6)
-#define GPIO_SWCLK_TCK      GPIO_NUM_19     // D8 GPIO19
-#define GPIO_SWDIO_TMS      GPIO_NUM_20     // D9 GPIO20
-#define GPIO_TDI            GPIO_NUM_22     // D4 GPIO22
-#define GPIO_TDO            GPIO_NUM_23     // D5 GPIO23
-#define GPIO_NTRST          GPIO_NUM_21     // D3 GPIO21
-#define GPIO_NRESET         GPIO_NUM_18     // D10 GPIO18
-#define GPIO_LED            GPIO_NUM_15     // onboard LED
-#define CPU_CLOCK           160000000U      ///< Specifies the CPU Clock in Hz.
+#define GPIO_SWCLK_TCK          GPIO_NUM_19     // D8 GPIO19
+#define GPIO_SWDIO_TMS          GPIO_NUM_20     // D9 GPIO20
+#define GPIO_TDI                GPIO_NUM_22     // D4 GPIO22
+#define GPIO_TDO                GPIO_NUM_23     // D5 GPIO23
+#define GPIO_NTRST              GPIO_NUM_21     // D3 GPIO21
+#define GPIO_NRESET             GPIO_NUM_18     // D10 GPIO18
+#define GPIO_LED                GPIO_NUM_15     // onboard LED
+#define CPU_CLOCK               160000000U      // Specifies the CPU Clock in Hz.
+#define IO_PORT_WRITE_CYCLES    72U             // I/O Cycles. Estimate for ESP32-C6.
+#define DELAY_SLOW_CYCLES       5U              // Number of cycles for one iteration.
 
 #elif defined(CONFIG_ESP_BOARD_ESP32S3_DEVKITC_1)
 // These pins are selected to be contiguous with the 5V and GND pins.
-#define GPIO_SWCLK_TCK      GPIO_NUM_14     // pin 20
-#define GPIO_SWDIO_TMS      GPIO_NUM_13     // pin 19
-#define GPIO_TDI            GPIO_NUM_10     // pin 16
-#define GPIO_TDO            GPIO_NUM_9      // pin 15
-#define GPIO_NTRST          GPIO_NUM_11     // pin 17
-#define GPIO_NRESET         GPIO_NUM_12     // pin 18
-#undef  GPIO_LED                            // No simple LED on board
-#define CPU_CLOCK           240000000U      ///< Specifies the CPU Clock in Hz.
+#define GPIO_SWCLK_TCK          GPIO_NUM_14     // pin 20
+#define GPIO_SWDIO_TMS          GPIO_NUM_13     // pin 19
+#define GPIO_TDI                GPIO_NUM_10     // pin 16
+#define GPIO_TDO                GPIO_NUM_9      // pin 15
+#define GPIO_NTRST              GPIO_NUM_11     // pin 17
+#define GPIO_NRESET             GPIO_NUM_12     // pin 18
+#undef  GPIO_LED                                // No simple LED on board
+#define CPU_CLOCK               240000000U      // Specifies the CPU Clock in Hz.
+#define IO_PORT_WRITE_CYCLES    72U             // FIXME I/O Cycles. Estimate for ESP32-C6.
+#define DELAY_SLOW_CYCLES       5U              // FIXME Number of cycles for one iteration.
 
 // Define other supported boards here...
 
@@ -74,8 +78,7 @@
 #error "CONFIG_ESP_BOARD_ is not defined. Run menuconfig and select a supported board."
 #endif
 
-//**************************************************************************************************
-/**
+/**************************************************************************************************
 \defgroup DAP_Config_Debug_gr CMSIS-DAP Debug Unit Information
 \ingroup DAP_ConfigIO_gr
 @{
@@ -103,10 +106,12 @@ This information includes:
 /// require 2 processor cycles for a I/O Port Write operation.  If the Debug Unit uses
 /// a Cortex-M0+ processor with high-speed peripheral I/O only 1 processor cycle might be
 /// required.
-#define IO_PORT_WRITE_CYCLES    72U             ///< I/O Cycles. Estimate for ESP32-C6.
+/// Board-specific - defined above.
+//#define IO_PORT_WRITE_CYCLES    72U           ///< I/O Cycles. Estimate for ESP32-C6.
 
 // Added for ESP32-C6.
-#define DELAY_SLOW_CYCLES       5U              // Number of cycles for one iteration.
+/// Board-specific - defined above.
+//#define DELAY_SLOW_CYCLES       5U            // Number of cycles for one iteration.
 
 /// Indicate that Serial Wire Debug (SWD) communication mode is available at the Debug Access Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
