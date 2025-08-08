@@ -171,6 +171,8 @@ impact performance.
 #define DEBUG_PRINTING
 ```
 
+## Performance
+
 A single SWD 32-bit transfer completes in about 45 microseconds, with an
 SWCLK clock rate of approximately 1 MHz. Yellow is SWCLK. Green is SWDIO.
 
@@ -180,3 +182,64 @@ limited. Redo these measurements with a better scope).
 ![scopeshot1](img/scopeshot1.png)
 
 ![scopeshot1](img/scopeshot2.png)
+
+Actual performance will depend on your WiFi network. For slow networks, 
+you might need to increase the ```cmsis-dap tcp min_timeout``` parameter if
+you see error messages related to command mismatch.
+
+Starting the OpenOCD server like this:
+```
+./src/openocd \
+    --search tcl \
+    -c "debug_level 2" \
+    -c "adapter driver cmsis-dap" \
+    -c "transport select swd" \
+    -c "cmsis-dap backend tcp" \
+    -c "cmsis-dap tcp host 192.168.1.107" \
+    -c "cmsis-dap tcp port 4441" \
+    -c "cmsis-dap tcp min_timeout 150" \
+    -f "tcl/target/stm32f4x.cfg" \
+    -c "reset_config none"
+
+Open On-Chip Debugger 0.12.0+dev-01114-gbf01f1089 (2025-08-07-11:52)
+Licensed under GNU GPL v2
+For bug reports, read
+	http://openocd.org/doc/doxygen/bugs.html
+Info : CMSIS-DAP: using minimum timeout of 100 ms for TCP packets.
+none separate
+Info : Listening on port 6666 for tcl connections
+Info : Listening on port 4444 for telnet connections
+Info : CMSIS-DAP: Connecting to 192.168.1.107:4441 using TCP backend
+Info : CMSIS-DAP: SWD supported
+Info : CMSIS-DAP: JTAG supported
+Info : CMSIS-DAP: Atomic commands supported
+Info : CMSIS-DAP: Test domain timer supported
+Info : CMSIS-DAP: FW Version = 2.1.2
+Info : CMSIS-DAP: Serial# = E4B323B60EB4
+Info : CMSIS-DAP: Interface Initialised (SWD)
+Info : SWCLK/TCK = 0 SWDIO/TMS = 0 TDI = 0 TDO = 0 nTRST = 0 nRESET = 1
+Info : CMSIS-DAP: Interface ready
+Info : clock speed 2000 kHz
+Info : SWD DPIDR 0x2ba01477
+Info : [stm32f4x.cpu] Cortex-M4 r0p1 processor detected
+Info : [stm32f4x.cpu] target has 6 breakpoints, 4 watchpoints
+Info : [stm32f4x.cpu] Examination succeed
+Info : [stm32f4x.cpu] starting gdb server on 3333
+Info : Listening on port 3333 for gdb connections
+Info : accepting 'telnet' connection on tcp/4444
+```
+
+Xiao ESP32C6 running at 160 MHz is the programmer board. Connecting to an 
+STM32F401RE target and reading and writing SRAM:
+
+```
+% telnet localhost 4444
+> poll off
+                   
+> load_image ./random_96kb.bin 0x20000000
+98304 bytes written at address 0x20000000
+downloaded 98304 bytes in 1.092678s (87.858 KiB/s)
+
+> dump_image /dev/null 0x20000000 0x18000
+dumped 98304 bytes in 1.469766s (65.317 KiB/s)
+```
