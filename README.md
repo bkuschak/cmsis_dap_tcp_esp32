@@ -74,13 +74,49 @@ The code  supports multiple different boards, and each one has its own
 
 Then run menuconfig. Goto the page “CMSIS-DAP TCP WiFi configuration” and set the
 WiFi SSID and password for your network. (If you are not using WPA2, you might 
-also need to adjust Auth Threshold setting). Connect the board via USB, build 
+need to adjust Auth Threshold setting). Connect the board via USB, build 
 the firmware, and flash it onto the board:
 
 ```
 idf.py fullclean menuconfig
 idf.py build flash
 ```
+
+### OPTIONAL: Adding support for a new board
+
+If you want to add support for a new ESP32 board:
+
+* Edit ```main/KConfig.projbuild``` and add a new board under the
+  "CMSIS-DAP board configuration" menu choice ESP_BOARD. Call it ESP_BOARD_<new_board_name>.
+  
+* Edit ```main/DAP_config.h``` and add a new ```#elif defined(CONFIG_ESP_BOARD_<new_board_name>)```.
+  Use #defines to assign the pin numbers and other parameters like this:
+  	```
+	#define GPIO_SWCLK_TCK      	GPIO_NUM_19
+	#define GPIO_SWDIO_TMS      	GPIO_NUM_20
+	#define GPIO_TDI            	GPIO_NUM_22
+	#define GPIO_TDO            	GPIO_NUM_23
+	#define GPIO_NTRST          	GPIO_NUM_21
+	#define GPIO_NRESET         	GPIO_NUM_18
+	#define GPIO_LED            	GPIO_NUM_15             
+	#define CPU_CLOCK    			160000000U      // Specifies the CPU Clock in Hz.
+	#define IO_PORT_WRITE_CYCLES 	72U             // I/O Cycles. Estimate for ESP32-C6.
+	#define DELAY_SLOW_CYCLES 		5U              // Number of cycles for one iteration.
+	```
+* Using one of the existing sdkconfig files as a starting point, run menuconfig
+  and make any changes needed for this new board. Build and flash the firmware
+  onto the board.
+    ```
+    cp sdkconfig.xiao_esp32c6 sdkconfig
+    idf.py fullclean menuconfig
+    idf.py build flash
+	```
+*  Rename the resulting sdkconfig file. Be sure to remove your WiFi credentials before
+   adding it to git! Update this README section to reference the new board.
+   ```
+   cp sdkconfig sdkconfig.<new_board_name>
+   git add sdkconfig.<new_board_name>
+   ```
 
 # Building and Running OpenOCD
 
