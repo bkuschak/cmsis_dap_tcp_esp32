@@ -79,14 +79,8 @@ This information includes:
  - Optional information about a connected Target Device (for Evaluation Boards).
 */
 
-#ifdef _RTE_
-#include "RTE_Components.h"
-#include CMSIS_device_header
-#else
-#include "device.h"                             // Debug Unit Cortex-M Processor Header File
-#endif
-
 #include <esp_timer.h>
+#include "device_config.h"
 
 /// Processor Clock of the Cortex-M MCU used in the Debug Unit.
 /// This value is used to calculate the SWD/JTAG clock speed.

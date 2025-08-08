@@ -8,6 +8,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include "DAP.h"
 #include "cmsis_dap_tcp.h"
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -26,6 +27,9 @@
 // Only a single client at a time may be connected.
 static int client_sockfd;
 static int server_sockfd;
+static uint8_t request[CMSIS_DAP_PACKET_SIZE];
+static uint8_t response[CMSIS_DAP_PACKET_SIZE];
+static uint8_t packet_buf[CMSIS_DAP_PACKET_SIZE + sizeof(struct cmsis_dap_tcp_packet_hdr)];
 
 static int socket_available(void)
 {
@@ -36,8 +40,6 @@ static int socket_available(void)
     int ret = ioctl(client_sockfd, FIONREAD, &nbytes);
     if(ret < 0)
         return 0;
-    if(ret > 0)
-        fprintf(stderr, "Available %d\n", ret);
     return nbytes;
 }
 
@@ -70,7 +72,6 @@ static int socket_disconnected(void)
 static int start_server(int port)
 {
     int ret;
-    int connfd;
     struct sockaddr_in server_addr;
 
     server_sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -115,7 +116,8 @@ static int handle_server(void)
 {
     // Handle a new client connecting.
     struct sockaddr_in client_addr;
-    unsigned len = sizeof(client_addr);
+    //unsigned len = sizeof(client_addr);
+    socklen_t len = sizeof(client_addr);
     int ret = accept(server_sockfd, (void*)&client_addr, &len);
     if(ret < 0) {
         if(errno == EWOULDBLOCK || errno == EAGAIN)
@@ -132,12 +134,12 @@ static int handle_server(void)
     }
     else {
         client_sockfd = ret;
-        fprintf(stderr, "Client connected. Socketfd: %d\n", client_sockfd);
+        fprintf(stderr, "Client connected.\n");
 
         // Use TCP keepalives to detect dead clients.
         int val = 1;
         setsockopt(client_sockfd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
-#if defined(__linux__) || defined(ESP32) || defined(ESP8266) || defined(ARDUINO_ARCH_ESP32)
+#if defined(__linux__) || defined(ESP_PLATFORM)
         // Seconds between probes (Linux and ESP32)
         val = 1;
         setsockopt(client_sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &val,
@@ -154,7 +156,7 @@ static int handle_server(void)
         setsockopt(client_sockfd, IPPROTO_TCP, TCP_KEEPALIVE, &val,
                     sizeof(val));
 #else
-#error "Platform not recognized! Cannot setup TCP keepalive."
+#warning "Platform not recognized! Cannot setup TCP keepalive."
 #endif
         ret = fcntl(client_sockfd, F_SETFL, O_NONBLOCK);
         if(ret < 0) {
@@ -210,19 +212,23 @@ static int socket_write(void* data, int len)
 
 static int send_dap_response(uint8_t *buf, int len)
 {
-    uint8_t packet[CMSIS_DAP_PACKET_SIZE + sizeof(struct cmsis_dap_tcp_packet_hdr)];
-    struct cmsis_dap_tcp_packet_hdr *header = packet;
+    struct cmsis_dap_tcp_packet_hdr *header = (void*)packet_buf;
+
+    if(len > sizeof(packet_buf) - sizeof(*header)) {
+        fprintf(stderr, "response too large for buffer!\n");
+        return -1;
+    }
 
     header->signature = h_u32_to_le(DAP_PKT_HDR_SIGNATURE);
     header->length = h_u16_to_le(len);
     header->packet_type = DAP_PKT_TYPE_RESPONSE;
     header->reserved = 0;
 
-    uint8_t *payload = packet + sizeof(*header);
+    uint8_t *payload = packet_buf + sizeof(*header);
     memcpy(payload, buf, len);
 
     len += sizeof(*header);
-    int ret = socket_write(packet, len);
+    int ret = socket_write(packet_buf, len);
     if(ret < 0)
         return ret;
     return ret == len ? 0 : -1;
@@ -286,9 +292,6 @@ int process_dap_requests(void)
 
     // Receive from socket, process all commands or until an error occurs.
     while(true) {
-        uint8_t request[CMSIS_DAP_PACKET_SIZE];
-        uint8_t response[CMSIS_DAP_PACKET_SIZE];
-
         int ret = recv_dap_request(request, sizeof(request));
         if(ret <= 0)
             return ret;

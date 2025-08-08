@@ -44,33 +44,52 @@ commit 1fd47bed772ea40923472c90dfe11516e76033ee (HEAD -> main, tag: v2.1.2, orig
 The software has some limitations:
 
 - CMSIS-DAP UART and SWO are currently unsupported.
-- Maximum clock rate is 1000 KHz (when ESP32 configured for 160 MHz / 80 MHz).
+- Maximum clock rate is about 1000 KHz (ESP32C6 configured for 160 MHz / 80 MHz).
 - The WiFi credentials are hardcoded. The software must be rebuilt if you want
   to change them.
 
-To configure your WiFi SSID and password, copy the
-```wifi_password_example.h``` file to ```wifi_password.h``` and edit it
-appropriately. For privacy, do not commit this file.
-
 ## Building
 
-The [Arduino-Timer library](https://github.com/contrem/arduino-timer) is
-a required prerequisite. Use the Arduino library manager to install it first.
-(Currently it is only used for monitoring the WiFi status).
+This code requires the ESP32-IDF build tools. Refer to the official
+[installation guide]
+(https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation).
 
-This build was tested with Arduino IDE v1.8.13, using the following settings:
+First activate your ESP-IDF virtual environment:
+```
+. $HOME/esp/esp-idf/export.sh
+```
 
-- Board: Adafruit Feather ESP32-C6
-- CPU Frequency: 160 MHz (Wifi)
+Select your target CPU and run menuconfig. In menuconfig select the "CMSIS-DAP
+TCP WiFi configuration" page and enter your WiFi SSID and password. If you are
+not using WPA2, you might also need to set the Auth Threshold setting
+appropriately. Quit menuconfig and build the code. Beware that the sdkconfig
+file contains your WiFi password. For security, do not commit that change to
+git.
+
+```
+idf.py set-target esp32c6
+idf.py menuconfig
+idf.py build
+```
+
+Assuming the build completed successfully, flash your board. You can run the
+serial monitor to view the console output. (Exit the serial monitor using
+Ctrl+]).
+
+```
+idf.py flash
+idf.py monitor
+```
+
+Once the ESP32 has connected to WiFi and obtained an IP address by DHCP, you
+can then run OpenOCD.
+
+The code was tested with the following:
+
+- Board: Xiao ESP32-C6
+- CPU Frequency: 160 MHz
 - Flash Frequency: 80 MHz
 - Flash mode: QIO
-- Partition scheme: Default 4MB with SPIFFS (1.2MB APP / 1.5MB SPIFFS)
-- Core debug level: None
-- Erase all flash before sketch upload: Enabled
-- JTAG adapter: Integrated USB JTAG
-
-Flash it onto the ESP32 using USB. This project doesn't currently support OTA
-updates, but this feature can be added if necessary.
 
 ## Building / Running OpenOCD
 
@@ -81,7 +100,7 @@ Until this change is merged into the main branch of OpenOCD, get it like this:
 ```
 git clone git://git.code.sf.net/p/openocd/code openocd
 cd openocd
-git fetch https://review.openocd.org/openocd refs/changes/73/8973/9
+git fetch https://review.openocd.org/openocd refs/changes/73/8973/14
 git checkout FETCH_HEAD
 ```
 
@@ -124,28 +143,30 @@ directory.  Replace ```firmware.elf``` with the name of your ELF file, and
 ## Operation
 
 After power-on, the ESP32 will attempt to connect to the WiFi that was
-configured in ```wifi_password.h``` It will then begin listing for an incoming
-connection from OpenOCD. If the ESP32 is connected to a USB serial port, it
-will print status and error messages to that port. A message is printed
+configured using menuconfig. It will then begin listing for an incoming
+connection from OpenOCD. The ESP32 will print status and error messages to the
+console, which can be observed using ```idf.py monitor```. A message is printed
 whenever the OpenOCD client connects or disconnects. Only one active connection
 is allowed.
 
 ```
-ESP32 cmsis_dap_tcp booting (HW version 1.0, SW version 0x0100) ...
-Attempting to connect to SSID 'SomeWifiRouter'
-....
-Connected to WiFi:
-SSID:        SomeWifiRouter
-RSSI:        -51 dBm
-IP Address:  192.168.1.4
-cmsis_dap_tcp server listening on port 4441.
+CMSIS-DAP TCP running on ESP32
+ESP-IDF version: v6.0-dev-1489-g4e036983a7
+Hardware version: esp32c6 with 1 CPU core(s), WiFi/BLE, 802.15.4 (Zigbee/Thread), silicon revision v0.1, 2MB external flash
+Minimum free heap size: 372552 bytes
+MAC address: E4B323B60EB4
+Attempting to connect to WiFi SSID: 'SomeWifiRouter'
+Connected to WiFi SSID: 'SomeWifiRouter'
+Got IP address: 192.168.1.107
 
+cmsis_dap_tcp server listening on port 4441.
 Client connected.
 Client disconnected.
 ```
 
-Additional messages may be enabled by editing cmsis_dap_tcp.h and uncommenting
-the following line. This will impact performance.
+Additional debugging messages may be enabled by editing
+```main/cmsis_dap_tcp.h``` and uncommenting the following line. This will
+impact performance.
 ```
 #define DEBUG_PRINTING
 ```
