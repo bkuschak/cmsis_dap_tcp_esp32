@@ -50,16 +50,16 @@ The software has some limitations:
 
 ## Building
 
-This code requires the ESP32-IDF build tools. Refer to the official
-[installation guide]
-(https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation).
+This code requires the ESP-IDF build tools. Refer to the official
+[installation guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation)
+and install them first.
 
 First activate your ESP-IDF virtual environment:
 ```
 . $HOME/esp/esp-idf/export.sh
 ```
 
-Select your target CPU and run menuconfig. In menuconfig select the "CMSIS-DAP
+Using the commands below, select your target CPU and run menuconfig. In menuconfig select the "CMSIS-DAP
 TCP WiFi configuration" page and enter your WiFi SSID and password. If you are
 not using WPA2, you might also need to set the Auth Threshold setting
 appropriately. Quit menuconfig and build the code. Beware that the sdkconfig
@@ -72,9 +72,9 @@ idf.py menuconfig
 idf.py build
 ```
 
-Assuming the build completed successfully, flash your board. You can run the
-serial monitor to view the console output. (Exit the serial monitor using
-Ctrl+]).
+Assuming the build completed successfully, flash it onto your board. You 
+can run the serial monitor to view the console output. (Exit the serial 
+monitor using Ctrl+]).
 
 ```
 idf.py flash
@@ -84,8 +84,9 @@ idf.py monitor
 Once the ESP32 has connected to WiFi and obtained an IP address by DHCP, you
 can then run OpenOCD.
 
-The code was tested with the following:
+This code was tested with the following:
 
+- Host: MacOS
 - Board: Xiao ESP32-C6
 - CPU Frequency: 160 MHz
 - Flash Frequency: 80 MHz
@@ -143,7 +144,7 @@ directory.  Replace ```firmware.elf``` with the name of your ELF file, and
 ## Operation
 
 After power-on, the ESP32 will attempt to connect to the WiFi that was
-configured using menuconfig. It will then begin listing for an incoming
+configured using menuconfig. It will then begin listening for an incoming
 connection from OpenOCD. The ESP32 will print status and error messages to the
 console, which can be observed using ```idf.py monitor```. A message is printed
 whenever the OpenOCD client connects or disconnects. Only one active connection
@@ -156,9 +157,8 @@ Hardware version: esp32c6 with 1 CPU core(s), WiFi/BLE, 802.15.4 (Zigbee/Thread)
 Minimum free heap size: 372552 bytes
 MAC address: E4B323B60EB4
 Attempting to connect to WiFi SSID: 'SomeWifiRouter'
-Connected to WiFi SSID: 'SomeWifiRouter'
-Got IP address: 192.168.1.107
-
+Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -75 dBm
+IP address: 192.168.1.107
 cmsis_dap_tcp server listening on port 4441.
 Client connected.
 Client disconnected.
