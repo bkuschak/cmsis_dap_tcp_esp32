@@ -73,7 +73,7 @@ idf.py fullclean menuconfig
 idf.py build flash
 ```
 
-In menuconfig:
+In menuconfig, goto to the "CMSIS-DAP configuration" page.
 
 * Your WiFi SSID and password can be configured on the "WiFi configuration"
   subpage.  (If you are not using WPA2, you might need to adjust Auth Threshold
