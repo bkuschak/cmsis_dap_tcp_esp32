@@ -52,7 +52,6 @@
 #include "esp_chip_info.h"
 #include "esp_event.h"
 #include "esp_flash.h"
-#include "esp_log.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "lwip/err.h"
@@ -62,11 +61,6 @@
 #include "DAP_config.h"
 #include "cmsis_dap_tcp.h"
 
-/* The examples use WiFi configuration that you can set via project configuration menu
-
-   If you'd rather not, just change the below entries to strings with
-   the config you want - ie #define WIFI_SSID "mywifissid"
-*/
 #define WIFI_SSID               CONFIG_ESP_WIFI_SSID
 #define WIFI_PASSWORD           CONFIG_ESP_WIFI_PASSWORD
 #define WIFI_MAXIMUM_RETRIES    CONFIG_ESP_MAXIMUM_RETRY
@@ -109,8 +103,7 @@
 #define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_WAPI_PSK
 #endif
 
-/* The event group allows multiple bits for each event, but we only care about
- * two events:
+/* Use an event group to signal two WiFi related events:
  * - we are connected to the AP with an IP
  * - we failed to connect after the maximum amount of retries
  */
@@ -119,45 +112,65 @@
 
 static uint8_t mac_addr[6];
 static char mac_addr_str[16];
-static EventGroupHandle_t s_wifi_event_group;
-static int s_retry_num = 0;
+static int wifi_retry_num;
+static EventGroupHandle_t wifi_event_group;
+static bool cmsis_dap_tcp_initialized;
+
+static void reboot(void)
+{
+    fflush(stdout);
+    fflush(stderr);
+    vTaskDelay(1000);
+    esp_restart();      // Does not return.
+}
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    }
-    else if (event_base == WIFI_EVENT &&
-             event_id == WIFI_EVENT_STA_CONNECTED) {
-        int rssi;
-        esp_wifi_sta_get_rssi(&rssi);
-        printf("Connected to WiFi SSID: '%s'. RSSI: %d dBm\n", WIFI_SSID,
-                rssi);
-    }
-    else if (event_base == WIFI_EVENT &&
-             event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < WIFI_MAXIMUM_RETRIES) {
+    if (event_base == WIFI_EVENT) {
+        if (event_id == WIFI_EVENT_STA_START) {
+            printf("Attempting to connect to WiFi SSID: '%s'\n", WIFI_SSID);
             esp_wifi_connect();
-            s_retry_num++;
-            printf("Retry connecting to WiFi SSID: '%s'\n", WIFI_SSID);
         }
-        else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        else if (event_id == WIFI_EVENT_STA_CONNECTED) {
+            int rssi;
+            esp_wifi_sta_get_rssi(&rssi);
+            printf("Connected to WiFi SSID: '%s'. RSSI: %d dBm\n", WIFI_SSID,
+                    rssi);
         }
-        printf("Failed to connecting to WiFi SSID: '%s'.\n", WIFI_SSID);
+        else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+            if (cmsis_dap_tcp_initialized) {
+                /* If connection is lost after we have initialized the server,
+                 * any connected sockets and the server socket have been lost.
+                 * The server socket must be reinitialized. Just reboot to
+                 * reinitialize everything.
+                 */
+                printf("Lost connection to WiFi SSID: '%s'. Rebooting...\n",
+                        WIFI_SSID);
+                reboot();       // Does not return.
+            }
+            if (wifi_retry_num < WIFI_MAXIMUM_RETRIES) {
+                printf("Retrying connection to WiFi SSID: '%s'\n", WIFI_SSID);
+                esp_wifi_connect();
+                wifi_retry_num++;
+            }
+            else {
+                printf("Failed to connect to WiFi SSID: '%s'.\n", WIFI_SSID);
+                xEventGroupSetBits(wifi_event_group, WIFI_FAIL_BIT);
+            }
+        }
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         printf("IP address: " IPSTR "\n", IP2STR(&event->ip_info.ip));
-        s_retry_num = 0;
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        wifi_retry_num = 0;
+        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
 
-void wifi_init_sta(void)
+int wifi_init(void)
 {
-    s_wifi_event_group = xEventGroupCreate();
+    wifi_event_group = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());
 
@@ -201,35 +214,26 @@ void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
 
-    printf("Attempting to connect to WiFi SSID: '%s'\n", WIFI_SSID);
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT)
+    /* Wait until either the connection is established (WIFI_CONNECTED_BIT)
      * or connection failed for the maximum number of re-tries (WIFI_FAIL_BIT).
-     * The bits are set by event_handler() (see above) */
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+     * The bits are set by event_handler() above.
+     */
+    EventBits_t bits = xEventGroupWaitBits(wifi_event_group,
             WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
             pdFALSE,
             pdFALSE,
             portMAX_DELAY);
 
-#if 0
-    /* xEventGroupWaitBits() returns the bits before the call returned, hence
-     * we can test which event actually happened. */
-    if (bits & WIFI_CONNECTED_BIT)
-        printf("Connected to WiFi SSID: '%s'\n", WIFI_SSID);
-    else if (bits & WIFI_FAIL_BIT)
-        printf("Failed to connect to SSID: '%s'\n", WIFI_SSID);
-    else
-        printf("Unexpected event 0x%02lx!", bits);
-#endif
+    if (bits & WIFI_CONNECTED_BIT) {
+        // Disable power-save to improve WiFi performance.
+        // https://github.com/espressif/arduino-esp32/issues/1484
+        esp_wifi_set_ps (WIFI_PS_NONE);
+        return 0;   // Success.
+    }
 
-    // TODO - return failure if Wifi not connected and IP address not obtained.
-    // Then main should reboot ESP32.
-
-    // Disable power save to improve WiFi performance.
-    // https://github.com/espressif/arduino-esp32/issues/1484
-    esp_wifi_set_ps (WIFI_PS_NONE);
+    return -1;      // Failure.
 }
 
 void app_main(void)
@@ -237,7 +241,7 @@ void app_main(void)
     printf("CMSIS-DAP TCP running on ESP32\n");
     printf("ESP-IDF version: %s\n", IDF_VER);
 
-    /* Print chip information */
+    // Print chip information.
     esp_chip_info_t chip_info;
     uint32_t flash_size;
     esp_chip_info(&chip_info);
@@ -288,34 +292,21 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-#if 0
-    if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL) {
-        /* If you only want to open more logs in the wifi module, you need to
-         * make the max level greater than the default level, and call
-         * esp_log_level_set() before esp_wifi_init() to improve the log level
-         * of the wifi module. */
-        esp_log_level_set("wifi", CONFIG_LOG_MAXIMUM_LEVEL);
+    /* Initialize WiFi and connect to AP. If unable to connect after retries,
+     * then force a reboot in an attempt to recover.
+     */
+    if (wifi_init() != 0) {
+        printf("Restarting due to WiFi connection failures.\n");
+        reboot();
     }
-#endif
 
-    // Initialize WiFi and connect to AP.
-    wifi_init_sta();
-
-    // crashes if network not up?
     // Initialize the CMSIS-DAP tcp server.
     cmsis_dap_tcp_init(CMSIS_DAP_TCP_PORT);
+    cmsis_dap_tcp_initialized = true;
 
     while(1) {
         // Handle the CMSIS-DAP commands.
         cmsis_dap_tcp_process();
         vTaskDelay(1);
     }
-
-#if 0
-    vTaskDelay(10000);
-    printf("Restarting now.\n");
-    fflush(stdout);
-    vTaskDelay(1000);
-    esp_restart();
-#endif
 }
