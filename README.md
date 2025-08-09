@@ -55,68 +55,33 @@ This code requires the ESP-IDF build tools. Refer to the official
 and install them first.
 
 First activate your ESP-IDF virtual environment:
+
 ```
 . $HOME/esp/esp-idf/export.sh
 ```
 
-The code  supports multiple different boards, and each one has its own 
-```sdkconfig``` file. 
+The code supports multiple different boards, and each one has its own
+```sdkconfig``` file.
 
-* To build for Xiao ESP32-C6 board:
-	```
-	cp sdkconfig.xiao_esp32c6 sdkconfig
-	```
-
-* To build for Espressif ESP32-S3-DevKitC-1 board:
-	```
-	cp sdkconfig.esp32s3_devkitc_1 sdkconfig
-	```
-
-Then run menuconfig. Goto the page “CMSIS-DAP TCP WiFi configuration” and set the
-WiFi SSID and password for your network. (If you are not using WPA2, you might 
-need to adjust Auth Threshold setting). Connect the board via USB, build 
-the firmware, and flash it onto the board:
+Choose the correct ```sdkconfig.<board_name>``` file for your board and copy it
+to ```sdkconfig```. Then configure, build and flash the firmware. For example,
+for the Xiao ESP32-C6 board:
 
 ```
+cp sdkconfig.xiao_esp32c6 sdkconfig
 idf.py fullclean menuconfig
 idf.py build flash
 ```
 
-### OPTIONAL: Adding support for a new board
+In menuconfig:
 
-If you want to add support for a new ESP32 board:
+* Your WiFi SSID and password can be configured on the "WiFi configuration"
+  subpage.  (If you are not using WPA2, you might need to adjust Auth Threshold
+  setting).
 
-* Edit ```main/KConfig.projbuild``` and add a new board under the
-  "CMSIS-DAP board configuration" menu choice ESP_BOARD. Call it ESP_BOARD_<new_board_name>.
-  
-* Edit ```main/DAP_config.h``` and add a new ```#elif defined(CONFIG_ESP_BOARD_<new_board_name>)```.
-  Use #defines to assign the pin numbers and other parameters like this:
-  	```
-	#define GPIO_SWCLK_TCK      	GPIO_NUM_19
-	#define GPIO_SWDIO_TMS      	GPIO_NUM_20
-	#define GPIO_TDI            	GPIO_NUM_22
-	#define GPIO_TDO            	GPIO_NUM_23
-	#define GPIO_NTRST          	GPIO_NUM_21
-	#define GPIO_NRESET         	GPIO_NUM_18
-	#define GPIO_LED            	GPIO_NUM_15             
-	#define CPU_CLOCK    			160000000U      // Specifies the CPU Clock in Hz.
-	#define IO_PORT_WRITE_CYCLES 	72U             // I/O Cycles. Estimate for ESP32-C6.
-	#define DELAY_SLOW_CYCLES 		5U              // Number of cycles for one iteration.
-	```
-* Using one of the existing sdkconfig files as a starting point, run menuconfig
-  and make any changes needed for this new board. Build and flash the firmware
-  onto the board.
-    ```
-    cp sdkconfig.xiao_esp32c6 sdkconfig
-    idf.py fullclean menuconfig
-    idf.py build flash
-	```
-*  Rename the resulting sdkconfig file. Be sure to remove your WiFi credentials before
-   adding it to git! Update this README section to reference the new board.
-   ```
-   cp sdkconfig sdkconfig.<new_board_name>
-   git add sdkconfig.<new_board_name>
-   ```
+* If needed, you can change the GPIO port pins for JTAG, SWD, reset, and LED on
+  the "GPIO number assignments" subpage.
+
 
 # Building and Running OpenOCD
 
@@ -156,9 +121,9 @@ transport select swd
 reset_config none
 ```
 
-To flash an STM32 target, for example, run the following command from your 
-OpenOCD build directory.  Replace ```firmware.elf``` with the name of your 
-ELF file, and ```stm32f1x.cfg``` with the appropriate file for your 
+To flash an STM32 target, for example, run the following command from your
+OpenOCD build directory.  Replace ```firmware.elf``` with the name of your
+ELF file, and ```stm32f1x.cfg``` with the appropriate file for your
 microcontroller.
 
 ```
@@ -173,11 +138,11 @@ microcontroller.
 After power-on, the ESP32 will attempt to connect to the WiFi that was
 configured using menuconfig. It will then begin listening for an incoming
 connection from OpenOCD. The ESP32 will print status and error messages to the
-console, including the WiFi connection status and IP address. A message is 
-printed whenever the OpenOCD client connects or disconnects. (Only one active 
+console, including the WiFi connection status and IP address. A message is
+printed whenever the OpenOCD client connects or disconnects. (Only one active
 client is allowed).
 
-You can run the serial monitor to view the console output. To exit the serial 
+You can run the serial monitor to view the console output. To exit the serial
 monitor use ```Ctrl+]```.
 
 ```
@@ -218,7 +183,7 @@ limited. Redo these measurements with a better scope).
 
 ![scopeshot1](img/scopeshot2.png)
 
-Actual performance will depend on your WiFi network. For slow networks, 
+Actual performance will depend on your WiFi network. For slow networks,
 you might need to increase the ```cmsis-dap tcp min_timeout``` parameter if
 you see error messages related to command mismatch.
 
@@ -266,13 +231,13 @@ Info : accepting 'telnet' connection on tcp/4444
 
 ## Using ESP32-C6 @ 160 MHz
 
-Xiao ESP32C6 running at 160 MHz is the programmer board. Connecting to an 
+Xiao ESP32C6 running at 160 MHz is the programmer board. Connecting to an
 STM32F401RE target and reading and writing SRAM:
 
 ```
 % telnet localhost 4444
 > poll off
-                   
+
 > load_image ./random_96kb.bin 0x20000000
 98304 bytes written at address 0x20000000
 downloaded 98304 bytes in 1.092678s (87.858 KiB/s)
@@ -318,7 +283,7 @@ Info : [stm32f4x.cpu] target has 6 breakpoints, 4 watchpoints
 Info : [stm32f4x.cpu] Examination succeed
 Info : [stm32f4x.cpu] starting gdb server on 3333
 Info : Listening on port 3333 for gdb connections
-[stm32f4x.cpu] halted due to debug-request, current mode: Thread 
+[stm32f4x.cpu] halted due to debug-request, current mode: Thread
 xPSR: 0x01000000 pc: 0x08000734 msp: 0x20018000
 ** Programming Started **
 Info : device id = 0x10016433
@@ -336,14 +301,14 @@ sys		0m0.155s
 
 ## Using ESP32-S3 @ 240 MHz
 
-Performance is higher on ESP32-S3. The throughput seems more variable 
-on each run, but here are some representative numbers for writing and 
+Performance is higher on ESP32-S3. The throughput seems more variable
+on each run, but here are some representative numbers for writing and
 reading SRAM:
 
 ```
 % telnet localhost 4444
 > poll off
-                      
+
 > load_image ./random_96kb.bin 0x20000000
 98304 bytes written at address 0x20000000
 downloaded 98304 bytes in 0.489488s (196.123 KiB/s)

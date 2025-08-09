@@ -1,87 +1,168 @@
-menu "CMSIS-DAP board configuration"
+menu "CMSIS-DAP configuration"
 
-    choice ESP_BOARD
-        prompt "Board selection"
-        default ESP_BOARD_UNKNOWN
+    menu "WiFi configuration"
+
+        config ESP_WIFI_SSID
+            string "WiFi SSID"
+            default "myssid"
+            help
+                SSID (network name) to connect to.
+
+        config ESP_WIFI_PASSWORD
+            string "WiFi Password"
+            default "mypassword"
+            help
+                WiFi password (WPA or WPA2) to use.
+
+        choice ESP_WIFI_SAE_MODE
+            prompt "WPA3 SAE mode selection"
+            default ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
+            help
+                Select mode for SAE as Hunt and Peck, H2E or both.
+            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HUNT_AND_PECK
+                bool "HUNT AND PECK"
+            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HASH_TO_ELEMENT
+                bool "H2E"
+                depends on ESP_WIFI_ENABLE_SAE_H2E
+            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
+                bool "BOTH"
+                depends on ESP_WIFI_ENABLE_SAE_H2E
+        endchoice
+
+        config ESP_WIFI_PW_ID
+            string "PASSWORD IDENTIFIER"
+            depends on  ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HASH_TO_ELEMENT || ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
+            default ""
+            help
+                password identifier for SAE H2E
+
+        config ESP_MAXIMUM_RETRY
+            int "Maximum retries"
+            default 5
+            help
+                Set the maximum number of retries to avoid station reconnecting to the AP forever when the AP is really inexistent.
+
+        choice ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD
+            prompt "WiFi Scan auth mode threshold"
+            default ESP_WIFI_AUTH_WPA2_PSK
+            help
+                The weakest authmode to accept in the scan mode.
+                This value defaults to ESP_WIFI_AUTH_WPA2_PSK in case password is present and ESP_WIFI_AUTH_OPEN is used.
+                Please select ESP_WIFI_AUTH_WEP/ESP_WIFI_AUTH_WPA_PSK in case AP is operating in WEP/WPA mode.
+
+            config ESP_WIFI_AUTH_OPEN
+                bool "OPEN"
+            config ESP_WIFI_AUTH_WEP
+                bool "WEP"
+            config ESP_WIFI_AUTH_WPA_PSK
+                bool "WPA PSK"
+            config ESP_WIFI_AUTH_WPA2_PSK
+                bool "WPA2 PSK"
+            config ESP_WIFI_AUTH_WPA_WPA2_PSK
+                bool "WPA/WPA2 PSK"
+            config ESP_WIFI_AUTH_WPA3_PSK
+                bool "WPA3 PSK"
+            config ESP_WIFI_AUTH_WPA2_WPA3_PSK
+                bool "WPA2/WPA3 PSK"
+            config ESP_WIFI_AUTH_WAPI_PSK
+                bool "WAPI PSK"
+        endchoice
+
+    endmenu
+
+    menu "GPIO number assignments"
+
+        config ESP_DAP_JTAG_SUPPORTED
+            bool "Target JTAG supported"
+            default y
+            help
+                Include support for JTAG.
+
+        config ESP_DAP_SWD_SUPPORTED
+            bool "Target SWD supported"
+            default y
+            help
+                Include support for SWD.
+
+        config ESP_DAP_JTAG_NTRST_SUPPORTED
+            bool "Target JTAG nTRST supported"
+            default y
+            help
+                Include support for driving the JTAG TRST signal.
+
+        config ESP_DAP_NRESET_SUPPORTED
+            bool "Target nRESET supported"
+            default y
+            help
+                Include support for driving the target nRESET signal.
+
+        config ESP_DAP_LED_SUPPORTED
+            bool "LED supported"
+            default y
+            help
+                Include support for turning on an LED when connected to the target.
+
+        config ESP_DAP_GPIO_SWCLK_TCK
+            int "GPIO number for SWCLK / TCK"
+            default 19
+            depends on ESP_DAP_JTAG_SUPPORTED || ESP_DAP_SWD_SUPPORTED
+
+        config ESP_DAP_GPIO_SWDIO_TMS
+            int "GPIO number for SWDIO / TMS"
+            default 20
+            depends on ESP_DAP_JTAG_SUPPORTED || ESP_DAP_SWD_SUPPORTED
+
+        config ESP_DAP_GPIO_TDI
+            int "GPIO number for TDI"
+            default 22
+            depends on ESP_DAP_JTAG_SUPPORTED
+
+        config ESP_DAP_GPIO_TDO
+            int "GPIO number for TDO"
+            default 23
+            depends on ESP_DAP_JTAG_SUPPORTED
+
+        config ESP_DAP_GPIO_NTRST
+            int "GPIO number for nTRST"
+            default 21
+            depends on ESP_DAP_JTAG_SUPPORTED && ESP_DAP_JTAG_NTRST_SUPPORTED
+
+        config ESP_DAP_GPIO_NRESET
+            int "GPIO number for nRESET"
+            default 18
+            depends on ESP_DAP_NRESET_SUPPORTED
+
+        config ESP_DAP_GPIO_LED
+            int "GPIO number for LED"
+            default 15
+            depends on ESP_DAP_LED_SUPPORTED
+
+        choice ESP_DAP_LED_POLARITY
+            prompt "LED polarity"
+            default ESP_DAP_LED_ACTIVE_LOW
+            depends on ESP_DAP_LED_SUPPORTED
+            help
+                The LED is either active high or active low.
+
+            config ESP_DAP_LED_ACTIVE_HIGH
+                bool "LED is active high"
+            config ESP_DAP_LED_ACTIVE_LOW
+                bool "LED is active low"
+        endchoice
+
+    endmenu
+
+    config ESP_DAP_IO_PORT_WRITE_CYCLES
+        int "Number of CPU clock cycles for a GPIO port write"
+        default 72
         help
-            Select a supported board for the build. The board-specific pin assignments are defined in DAP_config.h
+            This number may need to be tuned to get an accurate SWCLK/TCK frequency.
 
-        config ESP_BOARD_XIAO_ESP32C6
-            bool "Xiao ESP32-C6"
-        config ESP_BOARD_ESP32S3_DEVKITC_1
-            bool "Espressif ESP32-S3-DevKitC-1"
-        config ESP_BOARD_UNKNOWN
-            bool "Unknown board. Will cause build to fail."
-    endchoice
-
-endmenu
-
-menu "CMSIS-DAP TCP WiFi configuration"
-
-    config ESP_WIFI_SSID
-        string "WiFi SSID"
-        default "myssid"
-        help
-            SSID (network name) for the example to connect to.
-
-    config ESP_WIFI_PASSWORD
-        string "WiFi Password"
-        default "mypassword"
-        help
-            WiFi password (WPA or WPA2) for the example to use.
-
-    choice ESP_WIFI_SAE_MODE
-        prompt "WPA3 SAE mode selection"
-        default ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
-        help
-            Select mode for SAE as Hunt and Peck, H2E or both.
-        config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HUNT_AND_PECK
-            bool "HUNT AND PECK"
-        config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HASH_TO_ELEMENT
-            bool "H2E"
-            depends on ESP_WIFI_ENABLE_SAE_H2E
-        config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
-            bool "BOTH"
-            depends on ESP_WIFI_ENABLE_SAE_H2E
-    endchoice
-
-    config ESP_WIFI_PW_ID
-        string "PASSWORD IDENTIFIER"
-        depends on  ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HASH_TO_ELEMENT|| ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
-        default ""
-        help
-            password identifier for SAE H2E
-
-    config ESP_MAXIMUM_RETRY
-        int "Maximum retry"
+    config ESP_DAP_DELAY_SLOW_CYCLES
+        int "Number of CPU clock cycles for one delay loop iteration"
         default 5
         help
-            Set the Maximum retry to avoid station reconnecting to the AP unlimited when the AP is really inexistent.
+            This number may need to be tuned to get an accurate SWCLK/TCK frequency.
 
-    choice ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD
-        prompt "WiFi Scan auth mode threshold"
-        default ESP_WIFI_AUTH_WPA2_PSK
-        help
-            The weakest authmode to accept in the scan mode.
-            This value defaults to ESP_WIFI_AUTH_WPA2_PSK in case password is present and ESP_WIFI_AUTH_OPEN is used.
-            Please select ESP_WIFI_AUTH_WEP/ESP_WIFI_AUTH_WPA_PSK in case AP is operating in WEP/WPA mode.
-
-        config ESP_WIFI_AUTH_OPEN
-            bool "OPEN"
-        config ESP_WIFI_AUTH_WEP
-            bool "WEP"
-        config ESP_WIFI_AUTH_WPA_PSK
-            bool "WPA PSK"
-        config ESP_WIFI_AUTH_WPA2_PSK
-            bool "WPA2 PSK"
-        config ESP_WIFI_AUTH_WPA_WPA2_PSK
-            bool "WPA/WPA2 PSK"
-        config ESP_WIFI_AUTH_WPA3_PSK
-            bool "WPA3 PSK"
-        config ESP_WIFI_AUTH_WPA2_WPA3_PSK
-            bool "WPA2/WPA3 PSK"
-        config ESP_WIFI_AUTH_WAPI_PSK
-            bool "WAPI PSK"
-    endchoice
 
 endmenu

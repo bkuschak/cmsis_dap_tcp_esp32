@@ -52,13 +52,14 @@
 #include "esp_chip_info.h"
 #include "esp_event.h"
 #include "esp_flash.h"
+#include "esp_mac.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #include "nvs_flash.h"
 
-#include "DAP_config.h"
+#include "DAP.h"
 #include "cmsis_dap_tcp.h"
 
 #define WIFI_SSID               CONFIG_ESP_WIFI_SSID
@@ -238,6 +239,9 @@ int wifi_init(void)
 
 void app_main(void)
 {
+    // Initialize the JTAG/SWD port pins.
+    DAP_Setup();
+
     printf("CMSIS-DAP TCP running on ESP32\n");
     printf("ESP-IDF version: %s\n", IDF_VER);
 
@@ -280,10 +284,7 @@ void app_main(void)
     serial_number |= mac_addr[5];
     printf("MAC address: %s\n", mac_addr_str);
 
-    // Init SWD port pins
-    PORT_OFF();
-
-    // Initialize NVS
+    // Initialize NVS.
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
         ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

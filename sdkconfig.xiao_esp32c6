@@ -1152,15 +1152,11 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
-# CMSIS-DAP board configuration
+# CMSIS-DAP configuration
 #
-CONFIG_ESP_BOARD_XIAO_ESP32C6=y
-# CONFIG_ESP_BOARD_ESP32S3_DEVKITC_1 is not set
-# CONFIG_ESP_BOARD_UNKNOWN is not set
-# end of CMSIS-DAP board configuration
 
 #
-# CMSIS-DAP TCP WiFi configuration
+# WiFi configuration
 #
 # default:
 CONFIG_ESP_WIFI_SSID="myssid"
@@ -1174,8 +1170,7 @@ CONFIG_ESP_WIFI_PASSWORD="mypassword"
 CONFIG_ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH=y
 # default:
 CONFIG_ESP_WIFI_PW_ID=""
-# default:
-CONFIG_ESP_MAXIMUM_RETRY=5
+CONFIG_ESP_MAXIMUM_RETRY=20
 # default:
 # CONFIG_ESP_WIFI_AUTH_OPEN is not set
 # default:
@@ -1192,7 +1187,46 @@ CONFIG_ESP_WIFI_AUTH_WPA2_PSK=y
 # CONFIG_ESP_WIFI_AUTH_WPA2_WPA3_PSK is not set
 # default:
 # CONFIG_ESP_WIFI_AUTH_WAPI_PSK is not set
-# end of CMSIS-DAP TCP WiFi configuration
+# end of WiFi configuration
+
+#
+# GPIO number assignments
+#
+# default:
+CONFIG_ESP_DAP_JTAG_SUPPORTED=y
+# default:
+CONFIG_ESP_DAP_SWD_SUPPORTED=y
+# default:
+CONFIG_ESP_DAP_JTAG_NTRST_SUPPORTED=y
+# default:
+CONFIG_ESP_DAP_NRESET_SUPPORTED=y
+# default:
+CONFIG_ESP_DAP_LED_SUPPORTED=y
+# default:
+CONFIG_ESP_DAP_GPIO_SWCLK_TCK=19
+# default:
+CONFIG_ESP_DAP_GPIO_SWDIO_TMS=20
+# default:
+CONFIG_ESP_DAP_GPIO_TDI=22
+# default:
+CONFIG_ESP_DAP_GPIO_TDO=23
+# default:
+CONFIG_ESP_DAP_GPIO_NTRST=21
+# default:
+CONFIG_ESP_DAP_GPIO_NRESET=18
+# default:
+CONFIG_ESP_DAP_GPIO_LED=15
+# default:
+# CONFIG_ESP_DAP_LED_ACTIVE_HIGH is not set
+# default:
+CONFIG_ESP_DAP_LED_ACTIVE_LOW=y
+# end of GPIO number assignments
+
+# default:
+CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES=72
+# default:
+CONFIG_ESP_DAP_DELAY_SLOW_CYCLES=5
+# end of CMSIS-DAP configuration
 
 #
 # Compiler options

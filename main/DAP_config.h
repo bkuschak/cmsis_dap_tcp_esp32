@@ -29,13 +29,15 @@
 #define __DAP_CONFIG_H__
 
 /*
- * Modified to support XIAO-ESP32-C6 board. See defines below for the pinout.
- * Currently supports SWD, JTAG, NRESET, and TRST.
+ * NOTE:
+ * This file came from CMSIS-DAP which assumes the code is running on an ARM
+ * MCU. In our case it runs on an ESP32. Therefore comments below referring to
+ * Cortex-M, etc should be disregarded.
  *
  * IO_PORT_WRITE_CYCLES and DELAY_SLOW_CYCLES were empirically tuned on
  * ESP32-C6 @ 160 MHz / 80 MHz to achieve SWD clock rates that roughly match
- * the requested 'adapter speed <khz>'. These may need adjustment for other
- * devices.
+ * the requested 'adapter speed <khz>'. These values may need adjustment for
+ * other device and/or clock frequencies.
  */
 
 #include <driver/gpio.h>
@@ -45,37 +47,27 @@
 #include <soc/gpio_struct.h>
 #include <string.h>
 
-// Board-specific defines.
+// Board-specific defines come from the sdkconfig file.
+#if defined(CONFIG_ESP_DAP_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_SWD_SUPPORTED)
+#define GPIO_SWCLK_TCK          CONFIG_ESP_DAP_GPIO_SWCLK_TCK
+#define GPIO_SWDIO_TMS          CONFIG_ESP_DAP_GPIO_SWDIO_TMS
+#endif
 
-#if defined(CONFIG_ESP_BOARD_XIAO_ESP32C6)
-#define GPIO_SWCLK_TCK          GPIO_NUM_19     // D8 GPIO19
-#define GPIO_SWDIO_TMS          GPIO_NUM_20     // D9 GPIO20
-#define GPIO_TDI                GPIO_NUM_22     // D4 GPIO22
-#define GPIO_TDO                GPIO_NUM_23     // D5 GPIO23
-#define GPIO_NTRST              GPIO_NUM_21     // D3 GPIO21
-#define GPIO_NRESET             GPIO_NUM_18     // D10 GPIO18
-#define GPIO_LED                GPIO_NUM_15     // onboard LED
-#define CPU_CLOCK               160000000U      // Specifies the CPU Clock in Hz.
-#define IO_PORT_WRITE_CYCLES    72U             // I/O Cycles. Estimate for ESP32-C6.
-#define DELAY_SLOW_CYCLES       5U              // Number of cycles for one iteration.
+#ifdef CONFIG_ESP_DAP_JTAG_SUPPORTED
+#define GPIO_TDI                CONFIG_ESP_DAP_GPIO_TDI
+#define GPIO_TDO                CONFIG_ESP_DAP_GPIO_TDO
+#endif
 
-#elif defined(CONFIG_ESP_BOARD_ESP32S3_DEVKITC_1)
-// These pins are selected to be contiguous with the 5V and GND pins.
-#define GPIO_SWCLK_TCK          GPIO_NUM_14     // pin 20
-#define GPIO_SWDIO_TMS          GPIO_NUM_13     // pin 19
-#define GPIO_TDI                GPIO_NUM_10     // pin 16
-#define GPIO_TDO                GPIO_NUM_9      // pin 15
-#define GPIO_NTRST              GPIO_NUM_11     // pin 17
-#define GPIO_NRESET             GPIO_NUM_12     // pin 18
-#undef  GPIO_LED                                // No simple LED on board
-#define CPU_CLOCK               240000000U      // Specifies the CPU Clock in Hz.
-#define IO_PORT_WRITE_CYCLES    72U             // FIXME I/O Cycles. Estimate for ESP32-C6.
-#define DELAY_SLOW_CYCLES       5U              // FIXME Number of cycles for one iteration.
+#ifdef CONFIG_ESP_DAP_NTRST_SUPPORTED
+#define GPIO_NTRST              CONFIG_ESP_DAP_GPIO_NTRST
+#endif
 
-// Define other supported boards here...
+#ifdef CONFIG_ESP_DAP_NRESET_SUPPORTED
+#define GPIO_NRESET             CONFIG_ESP_DAP_GPIO_NRESET
+#endif
 
-#else
-#error "CONFIG_ESP_BOARD_ is not defined. Run menuconfig and select a supported board."
+#ifdef CONFIG_ESP_DAP_LED_SUPPORTED
+#define GPIO_LED                CONFIG_ESP_DAP_GPIO_LED
 #endif
 
 /**************************************************************************************************
@@ -98,7 +90,7 @@ This information includes:
 /// Processor Clock of the Cortex-M MCU used in the Debug Unit.
 /// This value is used to calculate the SWD/JTAG clock speed.
 /// Board-specific - defined above.
-//#define CPU_CLOCK               160000000U    ///< Specifies the CPU Clock in Hz.
+#define CPU_CLOCK               (CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 1000000)
 
 /// Number of processor cycles for I/O Port write operations.
 /// This value is used to calculate the SWD/JTAG clock speed that is generated with I/O
@@ -106,20 +98,27 @@ This information includes:
 /// require 2 processor cycles for a I/O Port Write operation.  If the Debug Unit uses
 /// a Cortex-M0+ processor with high-speed peripheral I/O only 1 processor cycle might be
 /// required.
-/// Board-specific - defined above.
-//#define IO_PORT_WRITE_CYCLES    72U           ///< I/O Cycles. Estimate for ESP32-C6.
+#define IO_PORT_WRITE_CYCLES    CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES
 
-// Added for ESP32-C6.
-/// Board-specific - defined above.
-//#define DELAY_SLOW_CYCLES       5U            // Number of cycles for one iteration.
+// Configurable delay for SWD/JTAG clock generation.
+// Number of CPU clock cycles for one iteration.
+#define DELAY_SLOW_CYCLES       CONFIG_ESP_DAP_DELAY_SLOW_CYCLES
 
 /// Indicate that Serial Wire Debug (SWD) communication mode is available at the Debug Access Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
+#ifdef CONFIG_ESP_DAP_SWD_SUPPORTED
 #define DAP_SWD                 1               ///< SWD Mode:  1 = available, 0 = not available.
+#else
+#define DAP_SWD                 0               ///< SWD Mode:  1 = available, 0 = not available.
+#endif
 
 /// Indicate that JTAG communication mode is available at the Debug Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
+#ifdef CONFIG_ESP_DAP_JTAG_SUPPORTED
 #define DAP_JTAG                1               ///< JTAG Mode: 1 = available, 0 = not available.
+#else
+#define DAP_JTAG                0               ///< JTAG Mode: 1 = available, 0 = not available.
+#endif
 
 /// Configure maximum number of JTAG devices on the scan chain connected to the Debug Access Port.
 /// This setting impacts the RAM requirements of the Debug Unit. Valid range is 1 .. 255.
@@ -381,18 +380,7 @@ Configures the DAP Hardware I/O pins for JTAG mode:
 */
 __STATIC_INLINE void PORT_JTAG_SETUP (void)
 {
-    // Use the slower gpio_ functions for the initial setup. Later, use direct
-    // register access later for toggling the pins quickly.
-    gpio_reset_pin(GPIO_SWCLK_TCK);
-    gpio_reset_pin(GPIO_SWDIO_TMS);
-    gpio_reset_pin(GPIO_TDI);
-    gpio_reset_pin(GPIO_TDO);
-    gpio_reset_pin(GPIO_NTRST);
-    gpio_reset_pin(GPIO_NRESET);
-#ifdef GPIO_LED
-    gpio_reset_pin(GPIO_LED);
-#endif
-
+#if DAP_JTAG
     gpio_set_level(GPIO_SWCLK_TCK, 1);
     gpio_set_level(GPIO_SWDIO_TMS, 1);
     gpio_set_level(GPIO_TDI, 1);
@@ -405,21 +393,25 @@ __STATIC_INLINE void PORT_JTAG_SETUP (void)
     gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_CAP_0);
     gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_CAP_0);
     gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_TDI, GPIO_DRIVE_CAP_0);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NTRST, GPIO_DRIVE_CAP_0);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
+#endif
 
+#ifdef GPIO_NTRST
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NTRST, GPIO_DRIVE_CAP_0);
+#endif
+#ifdef GPIO_NRESET
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
+#endif
+
+#ifdef GPIO_NTRST
     // NTRST as input with pullup.
     gpio_pullup_en(GPIO_NTRST);
     gpio_set_direction(GPIO_NTRST, GPIO_MODE_INPUT);
+#endif
 
+#ifdef GPIO_NRESET
     // NRESET (SRST) as input with pullup.
     gpio_pullup_en(GPIO_NRESET);
     gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
-
-#ifdef GPIO_LED
-    // LED off (active low)
-    gpio_set_level(GPIO_LED, 1);
-    gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
 #endif
 }
 
@@ -430,10 +422,7 @@ Configures the DAP Hardware I/O pins for Serial Wire Debug (SWD) mode:
 */
 __STATIC_INLINE void PORT_SWD_SETUP (void)
 {
-    // SRST as input with pullup, until commanded otherwise.
-    gpio_pullup_en(GPIO_NRESET);
-    gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
-
+#if DAP_SWD
     // SWCLK as output low.
     gpio_set_level(GPIO_SWCLK_TCK, 0);
     gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
@@ -446,16 +435,22 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
     // Set weakest drive strength to improve signal integrity.
     gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_CAP_0);
     gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_CAP_0);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
-
-#ifdef GPIO_LED
-    // LED off (active low)
-    gpio_set_level(GPIO_LED, 1);
-    gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
 #endif
 
-    // TODO consider setting TDI, NTRST as inputs with pullup
-    // so they don't float.
+#ifdef GPIO_TDI
+    gpio_reset_pin(GPIO_TDI);
+#endif
+
+#ifdef GPIO_NTRST
+    gpio_reset_pin(GPIO_NTRST);
+#endif
+
+#ifdef GPIO_NRESET
+    // SRST as input with pullup, until commanded otherwise.
+    gpio_pullup_en(GPIO_NRESET);
+    gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
+#endif
 }
 
 /** Disable JTAG/SWD I/O Pins.
@@ -464,14 +459,21 @@ Disables the DAP Hardware I/O pins which configures:
 */
 __STATIC_INLINE void PORT_OFF (void)
 {
+#ifdef GPIO_SWCLK_TCK
     gpio_reset_pin(GPIO_SWCLK_TCK);
+#endif
+#ifdef GPIO_SWDIO_TMS
     gpio_reset_pin(GPIO_SWDIO_TMS);
+#endif
+#if DAP_JTAG
     gpio_reset_pin(GPIO_TDI);
     gpio_reset_pin(GPIO_TDO);
+#endif
+#ifdef GPIO_NTRST
     gpio_reset_pin(GPIO_NTRST);
+#endif
+#ifdef GPIO_NRESET
     gpio_reset_pin(GPIO_NRESET);
-#ifdef GPIO_LED
-    gpio_reset_pin(GPIO_LED);
 #endif
 }
 
@@ -499,7 +501,9 @@ Set the SWCLK/TCK DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void)
 {
+#ifdef GPIO_SWCLK_TCK
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWCLK_TCK, 0);
+#endif
 }
 
 
@@ -510,7 +514,11 @@ __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_TMS_IN  (void)
 {
+#ifdef GPIO_SWDIO_TMS
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_SWDIO_TMS);
+#else
+    return 0;
+#endif
 }
 
 /** SWDIO/TMS I/O pin: Set Output to High.
@@ -518,7 +526,9 @@ Set the SWDIO/TMS DAP hardware I/O pin to high level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_SET (void)
 {
+#ifdef GPIO_SWDIO_TMS
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, 1);
+#endif
 }
 
 /** SWDIO/TMS I/O pin: Set Output to Low.
@@ -526,7 +536,9 @@ Set the SWDIO/TMS DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_CLR (void)
 {
+#ifdef GPIO_SWDIO_TMS
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, 0);
+#endif
 }
 
 /** SWDIO I/O pin: Get Input (used in SWD mode only).
@@ -534,7 +546,11 @@ __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_CLR (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void)
 {
+#ifdef GPIO_SWDIO_TMS
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_SWDIO_TMS);
+#else
+    return 0;
+#endif
 }
 
 /** SWDIO I/O pin: Set Output (used in SWD mode only).
@@ -542,7 +558,9 @@ __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void)
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT     (uint32_t bit)
 {
+#ifdef GPIO_SWDIO_TMS
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, bit & 1);
+#endif
 }
 
 /** SWDIO I/O pin: Switch to Output mode (used in SWD mode only).
@@ -551,7 +569,9 @@ called prior \ref PIN_SWDIO_OUT function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_ENABLE  (void)
 {
+#ifdef GPIO_SWDIO_TMS
     gpio_ll_output_enable(gpio_dev_ptr, GPIO_SWDIO_TMS);
+#endif
 }
 
 /** SWDIO I/O pin: Switch to Input mode (used in SWD mode only).
@@ -560,8 +580,10 @@ called prior \ref PIN_SWDIO_IN function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 {
+#ifdef GPIO_SWDIO_TMS
     gpio_ll_output_disable(gpio_dev_ptr, GPIO_SWDIO_TMS);
     gpio_ll_input_enable(gpio_dev_ptr, GPIO_SWDIO_TMS);
+#endif
 }
 
 
@@ -572,7 +594,11 @@ __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_TDI_IN  (void)
 {
+#ifdef GPIO_TDI
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_TDI);
+#else
+    return 0;
+#endif
 }
 
 /** TDI I/O pin: Set Output.
@@ -580,7 +606,9 @@ __STATIC_FORCEINLINE uint32_t PIN_TDI_IN  (void)
 */
 __STATIC_FORCEINLINE void     PIN_TDI_OUT (uint32_t bit)
 {
+#ifdef GPIO_TDI
     gpio_ll_set_level(gpio_dev_ptr, GPIO_TDI, bit & 1);
+#endif
 }
 
 
@@ -591,7 +619,11 @@ __STATIC_FORCEINLINE void     PIN_TDI_OUT (uint32_t bit)
 */
 __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 {
+#ifdef GPIO_TDO
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_TDO);
+#else
+    return 0;
+#endif
 }
 
 
@@ -602,7 +634,11 @@ __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 {
+#ifdef GPIO_NTRST
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_NTRST);
+#else
+    return 0;
+#endif
 }
 
 /** nTRST I/O pin: Set Output.
@@ -612,6 +648,7 @@ __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 */
 __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 {
+#ifdef GPIO_NTRST
     if(bit & 1) {
         // Set to input (pullup was enabled).
         gpio_ll_output_disable(gpio_dev_ptr, GPIO_NTRST);
@@ -621,6 +658,7 @@ __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
         gpio_ll_set_level(gpio_dev_ptr, GPIO_NTRST, 0);
         gpio_ll_output_enable(gpio_dev_ptr, GPIO_NTRST);
     }
+#endif
 }
 
 // nRESET Pin I/O------------------------------------------
@@ -630,7 +668,11 @@ __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 */
 __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN  (void)
 {
+#ifdef GPIO_NRESET
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_NRESET);
+#else
+    return 0;
+#endif
 }
 
 /** nRESET I/O pin: Set Output.
@@ -640,6 +682,7 @@ __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN  (void)
 */
 __STATIC_FORCEINLINE void     PIN_nRESET_OUT (uint32_t bit)
 {
+#ifdef GPIO_NRESET
     if(bit & 1) {
         // Set to input (pullup was enabled).
         gpio_ll_output_disable(gpio_dev_ptr, GPIO_NRESET);
@@ -649,6 +692,7 @@ __STATIC_FORCEINLINE void     PIN_nRESET_OUT (uint32_t bit)
         gpio_ll_set_level(gpio_dev_ptr, GPIO_NRESET, 0);
         gpio_ll_output_enable(gpio_dev_ptr, GPIO_NRESET);
     }
+#endif
 }
 
 ///@}
@@ -675,9 +719,12 @@ It is recommended to provide the following LEDs for status indication:
 __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit)
 {
 #ifdef GPIO_LED
-    // LED is active low.
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+#ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, bit);
+#else
     gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, !bit);
+#endif
 #endif
 }
 
@@ -734,14 +781,31 @@ Status LEDs. In detail the operation of Hardware I/O and LED pins are enabled an
 */
 __STATIC_INLINE void DAP_SETUP (void)
 {
+#if (DAP_JTAG == 1) || (DAP_SWD == 1)
     gpio_reset_pin(GPIO_SWCLK_TCK);
     gpio_reset_pin(GPIO_SWDIO_TMS);
+#endif
+#if DAP_JTAG
+    gpio_reset_pin(GPIO_TDI);
+    gpio_reset_pin(GPIO_TDO);
+#endif
+#ifdef GPIO_NTRST
+    gpio_reset_pin(GPIO_NTRST);
+    gpio_pullup_en(GPIO_NTRST);
+#endif
+#ifdef GPIO_NRESET
     gpio_reset_pin(GPIO_NRESET);
     gpio_pullup_en(GPIO_NRESET);
-
+#endif
 #ifdef GPIO_LED
-    // LED off (active low)
+    gpio_reset_pin(GPIO_LED);
+#endif
+#ifdef GPIO_LED
+#ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
+    gpio_set_level(GPIO_LED, 0);
+#else
     gpio_set_level(GPIO_LED, 1);
+#endif
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
 #endif
 }
@@ -759,6 +823,5 @@ __STATIC_INLINE uint8_t RESET_TARGET (void)
 }
 
 ///@}
-
 
 #endif /* __DAP_CONFIG_H__ */
