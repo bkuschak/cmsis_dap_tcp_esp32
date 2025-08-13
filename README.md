@@ -76,11 +76,11 @@ idf.py build flash
 In menuconfig, goto to the "CMSIS-DAP configuration" page.
 
 * Your WiFi SSID and password can be configured on the "WiFi configuration"
-  subpage.  (If you are not using WPA2, you might need to adjust Auth Threshold
-  setting).
+  subpage.  (If you are not using WPA2, you might need to adjust the WiFi Scan
+  auth mode threshold).
 
   <img src="img/menuconfig1.png" width="75%" />
-  
+  <br><br>
   <img src="img/menuconfig2.png" width="75%" />
 
 * If needed, you can change the GPIO port pins for JTAG, SWD, reset, and LED on
