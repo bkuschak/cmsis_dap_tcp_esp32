@@ -6,7 +6,7 @@ the addition of the OpenOCD cmsis_dap_tcp backend, the CMSIS-DAP protocol can
 now run over TCP/IP instead of USB. This allows OpenOCD to connect to a remote
 programmer over the network.
 
-This project provides the a remote-side implementation of the cmsis_dap_tcp
+This project provides the remote-side implementation of the cmsis_dap_tcp
 protocol, using an ESP32 as the remote programmer. It allows a cheap ESP32
 board to program and debug an ARM microcontroller target. Both JTAG and the
 two-wire SWD interface are supported. OpenOCD connects to the ESP32 using
@@ -54,7 +54,7 @@ This code requires the ESP-IDF build tools. Refer to the official
 [installation guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation)
 and install them first.
 
-First activate your ESP-IDF virtual environment:
+Activate your ESP-IDF virtual environment:
 
 ```
 . $HOME/esp/esp-idf/export.sh
@@ -79,8 +79,15 @@ In menuconfig, goto to the "CMSIS-DAP configuration" page.
   subpage.  (If you are not using WPA2, you might need to adjust Auth Threshold
   setting).
 
+  <img src="img/menuconfig1.png" width="75%" />
+  
+  <img src="img/menuconfig2.png" width="75%" />
+
 * If needed, you can change the GPIO port pins for JTAG, SWD, reset, and LED on
-  the "GPIO number assignments" subpage.
+  the "GPIO number assignments" subpage. The signals can be disabled if they are
+  not needed.
+
+  <img src="img/menuconfig3.png" width="75%" />
 
 
 # Building and Running OpenOCD
@@ -92,14 +99,14 @@ Until this change is merged into the main branch of OpenOCD, get it like this:
 ```
 git clone git://git.code.sf.net/p/openocd/code openocd
 cd openocd
-git fetch https://review.openocd.org/openocd refs/changes/73/8973/14
+git fetch https://review.openocd.org/openocd refs/changes/73/8973/17
 git checkout FETCH_HEAD
 ```
 
 You should see:
 
 ```
-HEAD is now at d91d79d7e jtag/drivers/cmsis_dap: add new backend cmsis_dap_tcp
+HEAD is now at 36b58ef69 jtag/drivers/cmsis_dap: add new backend cmsis_dap_tcp
 ```
 
 Configure and build OpenOCD as usual, while enabling the cmsis_dap_tcp driver:
@@ -119,6 +126,14 @@ cmsis-dap tcp host 192.168.1.4
 cmsis-dap tcp port 4441
 transport select swd
 reset_config none
+```
+
+If you are on a slow WiFi network, you might need to add this line to avoid
+short timeouts that can lead to command mismatch errors in some cases. If so,
+specify a longer timeout in milliseconds:
+
+```
+cmsis-dap tcp min_timeout 300
 ```
 
 To flash an STM32 target, for example, run the following command from your
