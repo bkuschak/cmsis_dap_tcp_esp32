@@ -76,7 +76,7 @@ static int start_server(int port)
 
     server_sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if(server_sockfd < 0) {
-        fprintf(stderr, "Failed to open server socket.\n");
+        fprintf(stderr, "cmsis_dap_tcp: failed to open server socket.\n");
         return -1;
     }
 
@@ -91,23 +91,23 @@ static int start_server(int port)
 
     ret = bind(server_sockfd, (void*)&server_addr, sizeof(server_addr));
     if(ret != 0) {
-        fprintf(stderr, "Failed to bind server socket.\n");
+        fprintf(stderr, "cmsis_dap_tcp: failed to bind server socket.\n");
         return -1;
     }
 
     ret = fcntl(server_sockfd, F_SETFL, O_NONBLOCK);
     if(ret < 0) {
-        fprintf(stderr, "Failed to set nonblocking server socket.\n");
+        fprintf(stderr, "cmsis_dap_tcp: failed to set nonblocking server socket.\n");
         return -1;
     }
 
     ret = listen(server_sockfd, 1);
     if(ret < 0) {
-        fprintf(stderr, "Failed to listen to server socket.\n");
+        fprintf(stderr, "cmsis_dap_tcp: failed to listen to server socket.\n");
         return -1;
     }
 
-    fprintf(stderr, "cmsis_dap_tcp server listening on port %d.\n", port);
+    fprintf(stderr, "cmsis_dap_tcp: listening on port %d.\n", port);
     return 0;
 }
 
@@ -116,7 +116,6 @@ static int handle_server(void)
 {
     // Handle a new client connecting.
     struct sockaddr_in client_addr;
-    //unsigned len = sizeof(client_addr);
     socklen_t len = sizeof(client_addr);
     int ret = accept(server_sockfd, (void*)&client_addr, &len);
     if(ret < 0) {
@@ -129,12 +128,14 @@ static int handle_server(void)
     // We only support a single connected client. If a client is already
     // connected, drop new connections.
     if(client_sockfd != 0) {
-        fprintf(stderr, "Dropping new connection.\n");
+        fprintf(stderr, "cmsis_dap_tcp: dropping new connection.\n");
         close(ret);
     }
     else {
         client_sockfd = ret;
-        fprintf(stderr, "Client connected.\n");
+        fprintf(stderr, "cmsis_dap_tcp: client connected %s:%d\n",
+                inet_ntoa(client_addr.sin_addr),
+                ntohs(client_addr.sin_port));
 
         // Use TCP keepalives to detect dead clients.
         int val = 1;
@@ -160,7 +161,7 @@ static int handle_server(void)
 #endif
         ret = fcntl(client_sockfd, F_SETFL, O_NONBLOCK);
         if(ret < 0) {
-            fprintf(stderr, "Failed to set nonblocking server socket.\n");
+            fprintf(stderr, "cmsis_dap_tcp: failed to set nonblocking server socket.\n");
             return -1;
         }
     }
@@ -174,7 +175,7 @@ static int handle_client(void)
         return 0;
 
     if(socket_disconnected()) {
-        fprintf(stderr, "Client disconnected.\n");
+        fprintf(stderr, "cmsis_dap_tcp: client disconnected.\n");
         close(client_sockfd);
         client_sockfd = 0;
     }
@@ -215,7 +216,7 @@ static int send_dap_response(uint8_t *buf, int len)
     struct cmsis_dap_tcp_packet_hdr *header = (void*)packet_buf;
 
     if(len > sizeof(packet_buf) - sizeof(*header)) {
-        fprintf(stderr, "response too large for buffer!\n");
+        fprintf(stderr, "cmsis_dap_tcp: response too large for buffer!\n");
         return -1;
     }
 

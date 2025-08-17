@@ -70,6 +70,105 @@ menu "CMSIS-DAP configuration"
 
     endmenu
 
+    menu "UART to TCP/IP bridge"
+
+        config ESP_UART_BRIDGE_ENABLED
+            bool "Enable the UART to TCP/IP bridge"
+            default n
+            help
+                Start a TCP/IP server that connects to a UART on the board. This
+                can be used to bridge a target board's console over TCP/IP.
+
+        config ESP_UART_BRIDGE_TCP_PORT
+            int "TCP port number"
+            default 4442
+            depends on ESP_UART_BRIDGE_ENABLED
+            help
+                Select the TCP port number for the UART bridge.
+
+        config ESP_UART_BRIDGE_USE_KEEPALIVE
+            bool "Enable TCP keep-alive packets and disconnect on timeout"
+            default y
+            depends on ESP_UART_BRIDGE_ENABLED
+            help
+                To detect dead clients, use TCP keepalives and drop the
+                connection if a timeout occurs.
+
+        config ESP_UART_BRIDGE_KEEPALIVE_TIMEOUT
+            int "TCP keep-alive timeout in seconds"
+            default 10
+            depends on ESP_UART_BRIDGE_USE_KEEPALIVE
+            help
+                Drop the connection if a client does not respond for this
+                number of seconds.
+
+        config ESP_UART_BRIDGE_UART_NUM
+            int "UART number"
+            default 1
+            depends on ESP_UART_BRIDGE_ENABLED
+            help
+                Select the UART number to use.
+
+        config ESP_UART_BRIDGE_REMAP_PINS
+            bool "Select the GPIO numbers used for UART TX and RX signals"
+            default n
+            depends on ESP_UART_BRIDGE_ENABLED
+            help
+                Choose the specific GPIO numbers to use for UART TX and RX.
+
+        config ESP_UART_BRIDGE_TXD_PIN
+            int "GPIO number for UART TX"
+            default 2
+            depends on ESP_UART_BRIDGE_REMAP_PINS
+            help
+                Choose the GPIO number to use for UART TX
+
+        config ESP_UART_BRIDGE_RXD_PIN
+            int "GPIO number for UART RX"
+            default 1
+            depends on ESP_UART_BRIDGE_REMAP_PINS
+            help
+                Choose the GPIO number to use for UART RX
+
+        config ESP_UART_BRIDGE_BAUD_RATE
+            int "UART baud rate"
+            default 115200
+            depends on ESP_UART_BRIDGE_ENABLED
+            help
+                Select the baud rate for the UART.
+
+        config ESP_UART_BRIDGE_DATA_BITS
+            int "UART data bits"
+            default 8
+            depends on ESP_UART_BRIDGE_ENABLED
+            help
+                Select the number of data bits (7 or 8) for the UART.
+
+        choice ESP_UART_BRIDGE_PARITY
+            prompt "UART parity"
+            default ESP_UART_BRIDGE_PARITY_NONE
+            depends on ESP_UART_BRIDGE_ENABLED
+            help
+                Select the parity for the UART.
+
+            config ESP_UART_BRIDGE_PARITY_NONE
+                bool "None"
+            config ESP_UART_BRIDGE_PARITY_EVEN
+                bool "Even"
+            config ESP_UART_BRIDGE_PARITY_ODD
+                bool "Odd"
+
+        endchoice
+
+        config ESP_UART_BRIDGE_STOP_BITS
+            int "UART stop bits"
+            default 1
+            depends on ESP_UART_BRIDGE_ENABLED
+            help
+                Select the number of stop bits (1 or 2) for the UART.
+
+    endmenu
+
     menu "GPIO number assignments"
 
         config ESP_DAP_JTAG_SUPPORTED
@@ -163,6 +262,5 @@ menu "CMSIS-DAP configuration"
         default 5
         help
             This number may need to be tuned to get an accurate SWCLK/TCK frequency.
-
 
 endmenu

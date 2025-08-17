@@ -34,7 +34,7 @@
  *
  * Status:
  * - Supports SWD, JTAG, NRESET, TRST.
- * - Target console serial port currently unsupported.
+ * - Provides a UART-to-TCP/IP bridge for the target's serial console.
  * - SWO trace port currently unsupported.
  *
  * Some parts of this code were adapted from:
@@ -61,6 +61,7 @@
 
 #include "DAP.h"
 #include "cmsis_dap_tcp.h"
+#include "uart_bridge.h"
 
 #define WIFI_SSID               CONFIG_ESP_WIFI_SSID
 #define WIFI_PASSWORD           CONFIG_ESP_WIFI_PASSWORD
@@ -300,6 +301,10 @@ void app_main(void)
         printf("Restarting due to WiFi connection failures.\n");
         reboot();
     }
+
+#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+    xTaskCreate(uart_bridge_task, "uart_bridge_task", 4096, NULL, 5, NULL);
+#endif
 
     // Initialize the CMSIS-DAP tcp server.
     cmsis_dap_tcp_init(CMSIS_DAP_TCP_PORT);
