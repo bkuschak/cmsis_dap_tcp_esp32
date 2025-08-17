@@ -71,6 +71,13 @@
 #error "Invalid setting for CONFIG_ESP_UART_BRIDGE_STOP_BITS."
 #endif
 
+#ifndef MAX
+#define MAX(a,b) \
+({ __typeof__ (a) _a = (a); \
+   __typeof__ (b) _b = (b); \
+ _a > _b ? _a : _b; })
+#endif
+
 static char buffer[BUFFER_SIZE];
 
 void uart_bridge_task(void* __attribute__((unused)) arg)
