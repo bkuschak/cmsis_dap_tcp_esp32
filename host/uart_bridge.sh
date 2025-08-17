@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Run this script on the host machine to create local serial port that is
-# bridged over TCP/HOST to the ESP32 UART. The ESP32 must be configured with:
+# bridged over TCP/IP to the ESP32 UART. The ESP32 must be configured with:
 #
 #     CONFIG_ESP_UART_BRIDGE_ENABLED=y
 #

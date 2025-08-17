@@ -24,6 +24,8 @@ board.
 - In JTAG mode, an optional GPIO pin can be used to drive the TRST signal, but
   this is typically not required.
 - A separate GPIO may be used to control an activity LED.
+- UART to TCP/IP bridge can be enabled to provide access to the target board's
+  serial console remotely, using an ESP32 UART.
 - Typical performance: flashing a 512 KB firmware image to the STM32F401RE
   completes in about 13.4 seconds, including erase, program, and verify (with 4
   to 8 seconds of that time used for flash erasure). The Blue Pill takes about
@@ -43,7 +45,7 @@ commit 1fd47bed772ea40923472c90dfe11516e76033ee (HEAD -> main, tag: v2.1.2, orig
 
 The software has some limitations:
 
-- CMSIS-DAP UART and SWO are currently unsupported.
+- SWO is currently unsupported.
 - Maximum clock rate is about 1000 KHz (ESP32C6 configured for 160 MHz / 80 MHz).
 - The WiFi credentials are hardcoded. The software must be rebuilt if you want
   to change them.
@@ -88,6 +90,14 @@ In menuconfig, goto to the "CMSIS-DAP configuration" page.
   not needed.
 
   <img src="img/menuconfig3.png" width="75%" />
+
+* If you want to use the UART to TCP/IP bridge, it can be configured on the
+  the "UART to TCP/IP bridge" subpage. (Currently, the baud rate and other
+  settings cannot be changed at runtime). A script ```host/uart_bridge.sh```
+  is provided that uses ```socat``` to present the remote UART as a pseudo-tty
+  that can be opened using any serial terminal program on the host.
+
+  <img src="img/menuconfig4.png" width="75%" />
 
 
 # Building and Running OpenOCD
