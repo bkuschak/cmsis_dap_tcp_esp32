@@ -50,8 +50,6 @@ The software has some limitations:
 
 - SWO is currently unsupported.
 - Maximum clock rate is about 1000 KHz (ESP32C6 configured for 160 MHz / 80 MHz).
-- The WiFi credentials are hardcoded. The software must be rebuilt if you want
-  to change them.
 
 # Building and Flashing the Firmware
 
@@ -80,9 +78,12 @@ idf.py build flash
 
 In menuconfig, goto to the "CMSIS-DAP configuration" page.
 
-* Your WiFi SSID and password can be configured on the "WiFi configuration"
+* Hardcoded WiFi credentials can be configured on the "WiFi configuration"
   subpage.  (If you are not using WPA2, you might need to adjust the WiFi Scan
   auth mode threshold).
+
+* There is an option to allow runtime configuration of the WiFi credentials
+  using the USB serial console, and these will be stored in flash memory.
 
   <img src="img/menuconfig1.png" width="75%" />
   <br><br>
@@ -104,7 +105,74 @@ In menuconfig, goto to the "CMSIS-DAP configuration" page.
 
 * If you want to support multiple independent JTAG/SWD interfaces, or use this
   code as component in another application see [this
-  section](#new-feature-multiple-interfaces-and-usage-as-a-component)
+  section](#multiple-interfaces-/-usage-as-a-component)
+
+Note: if you experience problems, additional debugging messages can be enabled
+by editing ```main/cmsis_dap_tcp.h``` and uncommenting the following line. This
+will impact performance.
+
+```
+#define DEBUG_PRINTING
+```
+
+# Running the Firmware
+
+If you like, you can run the serial monitor to view and control the console. To
+exit the serial monitor use ```Ctrl+]```.
+
+```
+idf.py monitor
+```
+
+## Connecting to WiFi
+
+After booting, the ESP32 will attempt to connect to WiFi. By default it will
+use the hardcoded credentials provided in menuconfig. Optionally, you can
+change these credentials at runtime using the command interface on the USB
+serial console. To do this, use the ```wifi``` command and reboot afterwards:
+
+```
+esp32> help
+esp32> wifi "my ssid" "my password" wpa2
+esp32> reboot
+```
+
+To undo this and revert back to the hardcoded credentials, use empty strings:
+
+```
+esp32> wifi "" ""
+esp32> reboot
+```
+
+After the ESP32 has connected to WiFi and obtained an IP address by DHCP you
+can then run OpenOCD. The ESP32 will print status and error messages to the
+console, including the WiFi connection status and IP address. A message is
+printed whenever the OpenOCD client connects or disconnects. (Only one active
+client is allowed).
+
+You should see something like this from the ESP32:
+
+```
+CMSIS-DAP TCP running on ESP32
+ESP-IDF version: v6.0-dev-1489-g4e036983a7
+Hardware version: esp32s3 with 2 CPU core(s), WiFi/BLE, silicon revision v0.2, 2MB external flash
+Minimum free heap size: 337312 bytes
+MAC address: E4B323B60EB4
+Enabling console commands.
+Type 'help' to get the list of commands.
+Use UP/DOWN arrows to navigate through command history.
+Press TAB when typing command name to auto-complete.
+Using WiFi credentials from flash.
+Attempting to connect to WiFi SSID: 'SomeWifiRouter'
+Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -75 dBm
+IP address: 192.168.1.107
+Disabling WiFi power savings to improve performance.
+cmsis_dap_tcp: listening on port 4441.
+UART bridge: remapping UART_TX = GPIO_NUM_16, UART_RX = GPIO_NUM_15.
+UART bridge: listening on port 4442 for UART1.
+IPv6 address (link-local): fe80:0000:0000:0000:9aa3:16ff:feec:6640
+IPv6 address (global): 2406:3400:031f:ba10:9aa3:16ff:feec:6640
+```
 
 # Building and Running OpenOCD
 
@@ -119,7 +187,7 @@ make
 ```
 
 An OpenOCD configuration file has been provided for convenience.
-Edit your ```tcl/interface/cmsis_dap_tcp.cfg``` configuration file to point to
+Edit your ```tcl/interface/cmsis-dap-tcp.cfg``` configuration file to point to
 your ESP32's IP address:
 
 ```
@@ -128,12 +196,13 @@ cmsis-dap backend tcp
 cmsis-dap tcp host 192.168.1.107
 cmsis-dap tcp port 4441
 transport select swd
+adapter speed 2000
 reset_config none
 ```
 
-If you are on a slow WiFi network, you might need to add this line to avoid
-short timeouts that can lead to command mismatch errors in some cases. If so,
-specify a longer timeout in milliseconds:
+If you are on a slow network, you might need to add this line to avoid short
+timeouts that can lead to command mismatch errors in some cases. If so, specify
+a longer timeout in milliseconds:
 
 ```
 cmsis-dap tcp min_timeout 300
@@ -151,49 +220,25 @@ microcontroller.
               -c "program firmware.elf verify reset exit"
 ```
 
-# Operation
-
-After power-on, the ESP32 will attempt to connect to the WiFi that was
-configured using menuconfig. It will then begin listening for an incoming
-connection from OpenOCD. The ESP32 will print status and error messages to the
-console, including the WiFi connection status and IP address. A message is
-printed whenever the OpenOCD client connects or disconnects. (Only one active
-client is allowed).
-
-You can run the serial monitor to view the console output. To exit the serial
-monitor use ```Ctrl+]```.
+To read/write SRAM, for example:
 
 ```
-idf.py monitor
+dd if=/dev/random of=random_96kb.bin bs=1024 count=96
+
+./src/openocd --search tcl \
+              -f tcl/interface/cmsis-dap-tcp.cfg \
+              -f tcl/target/stm32f1x.cfg \
+              -c "adapter speed 5000" \
+              -c "init; halt; reset; poll off" \
+              -c "load_image random_96kb.bin 0x20000000" \
+              -c "dump_image /dev/null 0x20000000 0x18000" \
+              -c "shutdown"
 ```
 
-Once the ESP32 has connected to WiFi and obtained an IP address by DHCP, you
-can then run OpenOCD. You should see something like this from the ESP32:
-
-```
-CMSIS-DAP TCP running on ESP32
-ESP-IDF version: v6.0-dev-1489-g4e036983a7
-Hardware version: esp32s3 with 2 CPU core(s), WiFi/BLE, silicon revision v0.2, 2MB external flash
-Minimum free heap size: 337312 bytes
-MAC address: E4B323B60EB4
-Attempting to connect to WiFi SSID: 'SomeWifiRouter'
-Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -75 dBm
-IP address: 192.168.1.107
-Disabling WiFi power savings to improve performance.
-cmsis_dap_tcp: listening on port 4441.
-UART bridge: remapping UART_TX = GPIO_NUM_16, UART_RX = GPIO_NUM_15.
-UART bridge: listening on port 4442 for UART1.
-IPv6 address (link-local): fe80:0000:0000:0000:9aa3:16ff:feec:6640
-IPv6 address (global): 2406:3400:031f:ba10:9aa3:16ff:feec:6640
-```
-
-Additional debugging messages may be enabled by editing
-```main/cmsis_dap_tcp.h``` and uncommenting the following line. This will
-impact performance.
-
-```
-#define DEBUG_PRINTING
-```
+Once everything is working you may disconnect the ESP32 from your PC and run
+it as a standalone device. It can be powered by a USB charger. This could be
+your normal use case, where the ESP32 is directly connected to a remote target,
+and all debugging and flash programming is done over the network.
 
 # Performance
 
@@ -322,9 +367,9 @@ Info : flash size = 512 KiB
 ** Resetting Target **
 shutdown command invoked
 
-real	0m19.242s
-user	0m0.052s
-sys		0m0.155s
+real    0m19.242s
+user    0m0.052s
+sys     0m0.155s
 ```
 
 ## Using ESP32-S3 @ 240 MHz

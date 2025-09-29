@@ -1185,6 +1185,7 @@ CONFIG_ESP_WIFI_AUTH_WPA2_PSK=y
 # CONFIG_ESP_WIFI_AUTH_WPA2_WPA3_PSK is not set
 # default:
 # CONFIG_ESP_WIFI_AUTH_WAPI_PSK is not set
+CONFIG_ESP_WIFI_CONSOLE_COMMANDS=y
 # end of WiFi configuration
 
 #
@@ -1356,6 +1357,13 @@ CONFIG_COMPILER_ORPHAN_SECTIONS_ERROR=y
 #
 # If a component configuration is missing, please add it to the main component's requirements
 #
+
+#
+# Console Library
+#
+# default:
+# CONFIG_CONSOLE_SORTED_HELP is not set
+# end of Console Library
 
 #
 # Driver Configurations

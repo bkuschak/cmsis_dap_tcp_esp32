@@ -24,4 +24,5 @@ idf_component_register(SRCS ${COMPONENT_SRCS}
                        REQUIRES esp_timer
                        REQUIRES esp_wifi
                        REQUIRES nvs_flash
+                       REQUIRES console
                        INCLUDE_DIRS "")

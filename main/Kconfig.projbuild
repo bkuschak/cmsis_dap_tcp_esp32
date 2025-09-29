@@ -68,6 +68,13 @@ menu "CMSIS-DAP configuration"
                 bool "WAPI PSK"
         endchoice
 
+        config ESP_WIFI_CONSOLE_COMMANDS
+            bool "Enable console commands for setting WiFi credentials at runtime."
+            default y
+            help
+                Enable console commands (wifi, reboot) for configuring WiFi
+                credentials at runtime and storing them in flash.
+
     endmenu
 
     menu "UART to TCP/IP bridge"
