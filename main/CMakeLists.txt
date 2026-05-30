@@ -1,5 +1,6 @@
 set(COMPONENT_SRCS
     "DAP.c"
+    "DAP_gpio_config.c"
     "DAP_vendor.c"
     "JTAG_DP.c"
     "SWO.c"

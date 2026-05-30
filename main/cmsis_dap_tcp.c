@@ -38,6 +38,7 @@
 #define DAP_PKT_HDR_SIGNATURE   0x00504144   // "DAP\0" in LE
 #define DAP_PKT_TYPE_REQUEST    0x01
 #define DAP_PKT_TYPE_RESPONSE   0x02
+#define CMSIS_DAP_TCP_MAX_ACTIVE 4
 
 #ifndef MAX
 #define MAX(a, b)               \
@@ -73,6 +74,14 @@ struct cmsis_dap_tcp_state {
     uint8_t response[DAP_PKT_SIZE];
     uint8_t packet_buf[DAP_TOTAL_PKT_SIZE];
 };
+
+struct cmsis_dap_tcp_resources {
+    int port;
+    struct cmsis_dap_gpio_config gpio;
+};
+
+static struct cmsis_dap_tcp_resources active_resources[CMSIS_DAP_TCP_MAX_ACTIVE];
+static portMUX_TYPE active_resources_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // ---------------------------------------------------------------------------
 // Use our own receive buffer to accumulate from the socket until a complete
@@ -245,6 +254,55 @@ static void set_keepalives(int fd, const struct cmsis_dap_tcp_config *config)
 #endif
 }
 
+static void get_effective_gpio_config(const struct cmsis_dap_tcp_config *config,
+        struct cmsis_dap_gpio_config *gpio)
+{
+    if (config && config->gpio) {
+        *gpio = *config->gpio;
+        return;
+    }
+
+    cmsis_dap_gpio_config_init(gpio);
+}
+
+static int reserve_resources(const struct cmsis_dap_tcp_config *config,
+        int port, struct cmsis_dap_tcp_resources *resources)
+{
+    int slot = -1;
+    resources->port = port;
+    get_effective_gpio_config(config, &resources->gpio);
+
+    portENTER_CRITICAL(&active_resources_mux);
+    for (int i = 0; i < CMSIS_DAP_TCP_MAX_ACTIVE; i++) {
+        if (active_resources[i].port == 0) {
+            if (slot < 0)
+                slot = i;
+            continue;
+        }
+        if (active_resources[i].port == resources->port ||
+                cmsis_dap_gpio_config_conflicts(&active_resources[i].gpio,
+                        &resources->gpio)) {
+            portEXIT_CRITICAL(&active_resources_mux);
+            return -1;
+        }
+    }
+    if (slot >= 0)
+        active_resources[slot] = *resources;
+    portEXIT_CRITICAL(&active_resources_mux);
+
+    return slot;
+}
+
+static void release_resources(int slot)
+{
+    if (slot < 0)
+        return;
+
+    portENTER_CRITICAL(&active_resources_mux);
+    active_resources[slot].port = 0;
+    portEXIT_CRITICAL(&active_resources_mux);
+}
+
 BaseType_t cmsis_dap_tcp_start(const struct cmsis_dap_tcp_config *config,
         const char *task_name, TaskHandle_t *handle)
 {
@@ -259,6 +317,15 @@ void cmsis_dap_tcp_task(void *arg)
     int listener_fd;
     const struct cmsis_dap_tcp_config *config = arg;
     int port = config && config->port > 0 ? config->port : CONFIG_ESP_DAP_TCP_PORT;
+    struct cmsis_dap_tcp_resources resources;
+    int resources_slot = reserve_resources(config, port, &resources);
+    if (resources_slot < 0) {
+        fprintf(stderr, "cmsis_dap_tcp: resource conflict on port or JTAG pins.\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    cmsis_dap_gpio_config = config ? config->gpio : NULL;
     DAP_Setup();
 
 #ifdef CONFIG_LWIP_IPV6
@@ -273,6 +340,7 @@ void cmsis_dap_tcp_task(void *arg)
     listener_fd = socket(AF_INET6, SOCK_STREAM, 0);
     if(listener_fd < 0) {
         perror("cmsis_dap_tcp: Failed to create listening socket.");
+        release_resources(resources_slot);
         vTaskDelete(NULL);
         return;
     }
@@ -294,6 +362,7 @@ void cmsis_dap_tcp_task(void *arg)
     listener_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listener_fd < 0) {
         perror("cmsis_dap_tcp: Failed to create listening socket.");
+        release_resources(resources_slot);
         vTaskDelete(NULL);
         return;
     }
@@ -306,6 +375,7 @@ void cmsis_dap_tcp_task(void *arg)
     if (bind(listener_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("cmsis_dap_tcp: failed to bind socket");
         close(listener_fd);
+        release_resources(resources_slot);
         vTaskDelete(NULL);
         return;
     }
@@ -313,6 +383,7 @@ void cmsis_dap_tcp_task(void *arg)
     if(listen(listener_fd, 1) < 0) {
         perror("cmsis_dap_tcp: failed to listen on socket");
         close(listener_fd);
+        release_resources(resources_slot);
         vTaskDelete(NULL);
         return;
     }
@@ -326,6 +397,7 @@ void cmsis_dap_tcp_task(void *arg)
     if (state == NULL) {
         perror("cmsis_dap_tcp: failed to allocate task state");
         close(listener_fd);
+        release_resources(resources_slot);
         vTaskDelete(NULL);
         return;
     }
@@ -441,5 +513,6 @@ void cmsis_dap_tcp_task(void *arg)
     if (client_fd >= 0) close(client_fd);
     close(listener_fd);
     free(state);
+    release_resources(resources_slot);
     vTaskDelete(NULL);
 }
