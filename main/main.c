@@ -551,9 +551,8 @@ int wifi_init(void)
 
 void app_main(void)
 {
-    // Initialize the JTAG/SWD port pins.
-    DAP_Setup();
-
+    // DAP_Setup() runs in cmsis_dap_tcp_task(), which owns the task-local DAP
+    // state used while processing CMSIS-DAP requests.
     printf("CMSIS-DAP TCP running on ESP32\n");
     printf("ESP-IDF version: %s\n", IDF_VER);
 
@@ -621,7 +620,7 @@ void app_main(void)
     xTaskCreate(uart_bridge_task, "uart_bridge_task", 4096, NULL, 5, NULL);
 #endif
 
-    xTaskCreate(cmsis_dap_tcp_task, "cmsis_dap_tcp_task", 4096, NULL, 5, NULL);
+    cmsis_dap_tcp_start(NULL, "cmsis_dap_tcp_task", NULL);
     cmsis_dap_tcp_initialized = true;
 
 #ifdef CONFIG_ESP_PRINT_CPU_USAGE

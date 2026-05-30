@@ -49,8 +49,8 @@
   ((CPU_CLOCK/2U) / (IO_PORT_WRITE_CYCLES + delay_cycles))
 
 
-         DAP_Data_t DAP_Data;           // DAP Data
-volatile uint8_t    DAP_TransferAbort;  // Transfer Abort Flag
+         __thread DAP_Data_t DAP_Data;           // DAP Data
+volatile __thread uint8_t    DAP_TransferAbort;  // Transfer Abort Flag
 
 
 static const char DAP_FW_Ver [] = DAP_FW_VER;
