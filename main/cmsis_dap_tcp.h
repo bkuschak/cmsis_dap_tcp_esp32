@@ -19,6 +19,7 @@ extern "C" {
 #define LOG_DEBUG(...) { }
 #endif
 
+#include "DAP_gpio_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -29,6 +30,7 @@ struct cmsis_dap_tcp_config {
     int port;
     int disable_keepalive;
     int keepalive_timeout;
+    const struct cmsis_dap_gpio_config *gpio;
 };
 
 // Start the CMSIS-DAP TCP task. If config is not NULL, it must remain valid for

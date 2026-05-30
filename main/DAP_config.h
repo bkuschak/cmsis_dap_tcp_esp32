@@ -46,29 +46,37 @@
 #include <esp_mac.h>
 #include <soc/gpio_struct.h>
 #include <string.h>
+#include "DAP_gpio_config.h"
 
 // Board-specific defines come from the sdkconfig file.
 #if defined(CONFIG_ESP_DAP_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_SWD_SUPPORTED)
-#define GPIO_SWCLK_TCK          CONFIG_ESP_DAP_GPIO_SWCLK_TCK
-#define GPIO_SWDIO_TMS          CONFIG_ESP_DAP_GPIO_SWDIO_TMS
+#define GPIO_SWCLK_TCK          (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->swclk_tck : CONFIG_ESP_DAP_GPIO_SWCLK_TCK)
+#define GPIO_SWDIO_TMS          (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->swdio_tms : CONFIG_ESP_DAP_GPIO_SWDIO_TMS)
 #endif
 
 #ifdef CONFIG_ESP_DAP_JTAG_SUPPORTED
-#define GPIO_TDI                CONFIG_ESP_DAP_GPIO_TDI
-#define GPIO_TDO                CONFIG_ESP_DAP_GPIO_TDO
+#define GPIO_TDI                (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->tdi : CONFIG_ESP_DAP_GPIO_TDI)
+#define GPIO_TDO                (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->tdo : CONFIG_ESP_DAP_GPIO_TDO)
 #endif
 
 #ifdef CONFIG_ESP_DAP_JTAG_NTRST_SUPPORTED
-#define GPIO_NTRST              CONFIG_ESP_DAP_GPIO_NTRST
+#define GPIO_NTRST              (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->ntrst : CONFIG_ESP_DAP_GPIO_NTRST)
 #endif
 
 #ifdef CONFIG_ESP_DAP_NRESET_SUPPORTED
-#define GPIO_NRESET             CONFIG_ESP_DAP_GPIO_NRESET
+#define GPIO_NRESET             (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->nreset : CONFIG_ESP_DAP_GPIO_NRESET)
 #endif
 
 #ifdef CONFIG_ESP_DAP_LED_SUPPORTED
-#define GPIO_LED                CONFIG_ESP_DAP_GPIO_LED
+#define GPIO_LED                (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->led : CONFIG_ESP_DAP_GPIO_LED)
+#ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
+#define GPIO_LED_ACTIVE_HIGH    (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->led_active_high : 1)
+#else
+#define GPIO_LED_ACTIVE_HIGH    (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->led_active_high : 0)
 #endif
+#endif
+
+#define GPIO_PIN_VALID(pin)     ((pin) >= 0)
 
 /**************************************************************************************************
 \defgroup DAP_Config_Debug_gr CMSIS-DAP Debug Unit Information
@@ -98,11 +106,17 @@ This information includes:
 /// require 2 processor cycles for a I/O Port Write operation.  If the Debug Unit uses
 /// a Cortex-M0+ processor with high-speed peripheral I/O only 1 processor cycle might be
 /// required.
-#define IO_PORT_WRITE_CYCLES    CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES
+#define IO_PORT_WRITE_CYCLES    ((cmsis_dap_gpio_config && \
+                                  cmsis_dap_gpio_config->io_port_write_cycles > 0) ? \
+                                  cmsis_dap_gpio_config->io_port_write_cycles : \
+                                  CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES)
 
 // Configurable delay for SWD/JTAG clock generation.
 // Number of CPU clock cycles for one iteration.
-#define DELAY_SLOW_CYCLES       CONFIG_ESP_DAP_DELAY_SLOW_CYCLES
+#define DELAY_SLOW_CYCLES       ((cmsis_dap_gpio_config && \
+                                  cmsis_dap_gpio_config->delay_slow_cycles > 0) ? \
+                                  cmsis_dap_gpio_config->delay_slow_cycles : \
+                                  CONFIG_ESP_DAP_DELAY_SLOW_CYCLES)
 
 /// Indicate that Serial Wire Debug (SWD) communication mode is available at the Debug Access Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
@@ -396,22 +410,30 @@ __STATIC_INLINE void PORT_JTAG_SETUP (void)
 #endif
 
 #ifdef GPIO_NTRST
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NTRST, GPIO_DRIVE_CAP_0);
+    if (GPIO_PIN_VALID(GPIO_NTRST))
+        gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NTRST,
+                GPIO_DRIVE_CAP_0);
 #endif
 #ifdef GPIO_NRESET
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
+    if (GPIO_PIN_VALID(GPIO_NRESET))
+        gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET,
+                GPIO_DRIVE_CAP_0);
 #endif
 
 #ifdef GPIO_NTRST
-    // NTRST as input with pullup.
-    gpio_pullup_en(GPIO_NTRST);
-    gpio_set_direction(GPIO_NTRST, GPIO_MODE_INPUT);
+    if (GPIO_PIN_VALID(GPIO_NTRST)) {
+        // NTRST as input with pullup.
+        gpio_pullup_en(GPIO_NTRST);
+        gpio_set_direction(GPIO_NTRST, GPIO_MODE_INPUT);
+    }
 #endif
 
 #ifdef GPIO_NRESET
-    // NRESET (SRST) as input with pullup.
-    gpio_pullup_en(GPIO_NRESET);
-    gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
+    if (GPIO_PIN_VALID(GPIO_NRESET)) {
+        // NRESET (SRST) as input with pullup.
+        gpio_pullup_en(GPIO_NRESET);
+        gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
+    }
 #endif
 }
 
@@ -442,14 +464,18 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
 #endif
 
 #ifdef GPIO_NTRST
-    gpio_reset_pin(GPIO_NTRST);
+    if (GPIO_PIN_VALID(GPIO_NTRST))
+        gpio_reset_pin(GPIO_NTRST);
 #endif
 
 #ifdef GPIO_NRESET
-    // SRST as input with pullup, until commanded otherwise.
-    gpio_pullup_en(GPIO_NRESET);
-    gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET, GPIO_DRIVE_CAP_0);
+    if (GPIO_PIN_VALID(GPIO_NRESET)) {
+        // SRST as input with pullup, until commanded otherwise.
+        gpio_pullup_en(GPIO_NRESET);
+        gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
+        gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET,
+                GPIO_DRIVE_CAP_0);
+    }
 #endif
 }
 
@@ -470,10 +496,12 @@ __STATIC_INLINE void PORT_OFF (void)
     gpio_reset_pin(GPIO_TDO);
 #endif
 #ifdef GPIO_NTRST
-    gpio_reset_pin(GPIO_NTRST);
+    if (GPIO_PIN_VALID(GPIO_NTRST))
+        gpio_reset_pin(GPIO_NTRST);
 #endif
 #ifdef GPIO_NRESET
-    gpio_reset_pin(GPIO_NRESET);
+    if (GPIO_PIN_VALID(GPIO_NRESET))
+        gpio_reset_pin(GPIO_NRESET);
 #endif
 }
 
@@ -635,10 +663,10 @@ __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 {
 #ifdef GPIO_NTRST
-    return gpio_ll_get_level(gpio_dev_ptr, GPIO_NTRST);
-#else
-    return 0;
+    if (GPIO_PIN_VALID(GPIO_NTRST))
+        return gpio_ll_get_level(gpio_dev_ptr, GPIO_NTRST);
 #endif
+    return 0;
 }
 
 /** nTRST I/O pin: Set Output.
@@ -649,6 +677,9 @@ __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 {
 #ifdef GPIO_NTRST
+    if (!GPIO_PIN_VALID(GPIO_NTRST))
+        return;
+
     if(bit & 1) {
         // Set to input (pullup was enabled).
         gpio_ll_output_disable(gpio_dev_ptr, GPIO_NTRST);
@@ -669,10 +700,10 @@ __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN  (void)
 {
 #ifdef GPIO_NRESET
-    return gpio_ll_get_level(gpio_dev_ptr, GPIO_NRESET);
-#else
-    return 0;
+    if (GPIO_PIN_VALID(GPIO_NRESET))
+        return gpio_ll_get_level(gpio_dev_ptr, GPIO_NRESET);
 #endif
+    return 0;
 }
 
 /** nRESET I/O pin: Set Output.
@@ -683,6 +714,9 @@ __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN  (void)
 __STATIC_FORCEINLINE void     PIN_nRESET_OUT (uint32_t bit)
 {
 #ifdef GPIO_NRESET
+    if (!GPIO_PIN_VALID(GPIO_NRESET))
+        return;
+
     if(bit & 1) {
         // Set to input (pullup was enabled).
         gpio_ll_output_disable(gpio_dev_ptr, GPIO_NRESET);
@@ -719,12 +753,11 @@ It is recommended to provide the following LEDs for status indication:
 __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit)
 {
 #ifdef GPIO_LED
+    if (!GPIO_PIN_VALID(GPIO_LED))
+        return;
+
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
-#ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
-    gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, bit);
-#else
-    gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, !bit);
-#endif
+    gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, GPIO_LED_ACTIVE_HIGH ? bit : !bit);
 #endif
 }
 
@@ -790,23 +823,26 @@ __STATIC_INLINE void DAP_SETUP (void)
     gpio_reset_pin(GPIO_TDO);
 #endif
 #ifdef GPIO_NTRST
-    gpio_reset_pin(GPIO_NTRST);
-    gpio_pullup_en(GPIO_NTRST);
+    if (GPIO_PIN_VALID(GPIO_NTRST)) {
+        gpio_reset_pin(GPIO_NTRST);
+        gpio_pullup_en(GPIO_NTRST);
+    }
 #endif
 #ifdef GPIO_NRESET
-    gpio_reset_pin(GPIO_NRESET);
-    gpio_pullup_en(GPIO_NRESET);
+    if (GPIO_PIN_VALID(GPIO_NRESET)) {
+        gpio_reset_pin(GPIO_NRESET);
+        gpio_pullup_en(GPIO_NRESET);
+    }
 #endif
 #ifdef GPIO_LED
-    gpio_reset_pin(GPIO_LED);
+    if (GPIO_PIN_VALID(GPIO_LED))
+        gpio_reset_pin(GPIO_LED);
 #endif
 #ifdef GPIO_LED
-#ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
-    gpio_set_level(GPIO_LED, 0);
-#else
-    gpio_set_level(GPIO_LED, 1);
-#endif
-    gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+    if (GPIO_PIN_VALID(GPIO_LED)) {
+        gpio_set_level(GPIO_LED, GPIO_LED_ACTIVE_HIGH ? 0 : 1);
+        gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+    }
 #endif
 }
 
