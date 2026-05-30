@@ -58,7 +58,7 @@
 #define GPIO_TDO                CONFIG_ESP_DAP_GPIO_TDO
 #endif
 
-#ifdef CONFIG_ESP_DAP_NTRST_SUPPORTED
+#ifdef CONFIG_ESP_DAP_JTAG_NTRST_SUPPORTED
 #define GPIO_NTRST              CONFIG_ESP_DAP_GPIO_NTRST
 #endif
 
