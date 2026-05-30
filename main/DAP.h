@@ -264,8 +264,8 @@ typedef struct {
 #endif
 } DAP_Data_t;
 
-extern          DAP_Data_t DAP_Data;            // DAP Data
-extern volatile uint8_t    DAP_TransferAbort;   // Transfer Abort Flag
+extern          __thread DAP_Data_t DAP_Data;            // DAP Data
+extern volatile __thread uint8_t    DAP_TransferAbort;   // Transfer Abort Flag
 
 
 #ifdef  __cplusplus
