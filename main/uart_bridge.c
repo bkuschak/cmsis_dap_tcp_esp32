@@ -17,8 +17,8 @@
  *
  *     screen /tmp/tty_uart
  *
- * The UART number, baud rate, parity, and data/stop bits are fixed at build
- * time, and can be adjusted by these menuconfig options:
+ * The standalone app default is fixed at build time and can be adjusted by
+ * these menuconfig options:
  *
  *     CONFIG_ESP_UART_BRIDGE_UART_NUM
  *     CONFIG_ESP_UART_BRIDGE_BAUD_RATE
@@ -78,12 +78,34 @@
  _a > _b ? _a : _b; })
 #endif
 
-static char buffer[BUFFER_SIZE];
+static const struct uart_bridge_config default_uart_bridge_config = {
+    .port       = CONFIG_ESP_UART_BRIDGE_TCP_PORT,
+#ifdef CONFIG_ESP_UART_BRIDGE_USE_KEEPALIVE
+    .keepalive_timeout = CONFIG_ESP_UART_BRIDGE_KEEPALIVE_TIMEOUT,
+#else
+    .keepalive_timeout = 0,
+#endif
+    .uart_num   = CONFIG_ESP_UART_BRIDGE_UART_NUM,
+#ifdef CONFIG_ESP_UART_BRIDGE_REMAP_PINS
+    .txd_pin    = CONFIG_ESP_UART_BRIDGE_TXD_PIN,
+    .rxd_pin    = CONFIG_ESP_UART_BRIDGE_RXD_PIN,
+#else
+    .txd_pin    = UART_PIN_NO_CHANGE,
+    .rxd_pin    = UART_PIN_NO_CHANGE,
+#endif
+    .baud_rate  = CONFIG_ESP_UART_BRIDGE_BAUD_RATE,
+    .data_bits  = UART_DATA_BITS,
+    .parity     = UART_PARITY,
+    .stop_bits  = UART_STOP_BITS,
+};
 
-void uart_bridge_task(void* __attribute__((unused)) arg)
+void uart_bridge_task(void* arg)
 {
+    struct uart_bridge_config config =
+        (arg != NULL) ? *(struct uart_bridge_config*)arg :
+        default_uart_bridge_config;
+    char buffer[BUFFER_SIZE];
     int ret;
-    int port = CONFIG_ESP_UART_BRIDGE_TCP_PORT;
 
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listen_fd < 0) {
@@ -100,7 +122,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(port);
+    server_addr.sin_port = htons(config.port);
     ret = bind(listen_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
     if(ret < 0) {
         perror("UART bridge: failed to bind socket");
@@ -115,7 +137,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
     }
 
     // Set up UART.
-    ret = uart_driver_install(CONFIG_ESP_UART_BRIDGE_UART_NUM,
+    ret = uart_driver_install(config.uart_num,
             UART_BUFFER_SIZE, UART_BUFFER_SIZE, 0, NULL, 0);
     if(ret != ESP_OK) {
         fprintf(stderr, "UART bridge: UART driver installation failed\n");
@@ -123,31 +145,30 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
         return;
     }
     uart_config_t uart_config = {
-        .baud_rate  = CONFIG_ESP_UART_BRIDGE_BAUD_RATE,
-        .data_bits  = UART_DATA_BITS,
-        .parity     = UART_PARITY,
-        .stop_bits  = UART_STOP_BITS,
+        .baud_rate  = config.baud_rate,
+        .data_bits  = config.data_bits,
+        .parity     = config.parity,
+        .stop_bits  = config.stop_bits,
         .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    ESP_ERROR_CHECK(uart_param_config(CONFIG_ESP_UART_BRIDGE_UART_NUM,
+    ESP_ERROR_CHECK(uart_param_config(config.uart_num,
                 &uart_config));
 
-#ifdef CONFIG_ESP_UART_BRIDGE_REMAP_PINS
-    fprintf(stderr, "UART bridge: remapping UART_TX = GPIO_NUM_%u, UART_RX = "
-            "GPIO_NUM_%u.\n", CONFIG_ESP_UART_BRIDGE_TXD_PIN,
-            CONFIG_ESP_UART_BRIDGE_RXD_PIN);
-    ESP_ERROR_CHECK(uart_set_pin(CONFIG_ESP_UART_BRIDGE_UART_NUM,
-                CONFIG_ESP_UART_BRIDGE_TXD_PIN, CONFIG_ESP_UART_BRIDGE_RXD_PIN,
-                UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-#endif
+    if(config.txd_pin != UART_PIN_NO_CHANGE ||
+       config.rxd_pin != UART_PIN_NO_CHANGE) {
+        fprintf(stderr, "UART bridge: remapping UART_TX = GPIO_NUM_%d, "
+                "UART_RX = GPIO_NUM_%d.\n", config.txd_pin, config.rxd_pin);
+        ESP_ERROR_CHECK(uart_set_pin(config.uart_num,
+                    config.txd_pin, config.rxd_pin,
+                    UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    }
 
     char uart_addr[32];
-    snprintf(uart_addr, sizeof(uart_addr), "/dev/uart/%u",
-            CONFIG_ESP_UART_BRIDGE_UART_NUM);
+    snprintf(uart_addr, sizeof(uart_addr), "/dev/uart/%d", config.uart_num);
 
-    fprintf(stdout, "UART bridge: listening on port %d for UART%u.\n", port,
-            CONFIG_ESP_UART_BRIDGE_UART_NUM);
+    fprintf(stdout, "UART bridge: listening on port %d for UART%d.\n",
+            config.port, config.uart_num);
 
     // Select() loop blocks until activity on sockets or UART.
     struct sockaddr_in client_addr;
@@ -193,7 +214,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                             inet_ntoa(client_addr.sin_addr),
                             ntohs(client_addr.sin_port));
 
-#ifdef CONFIG_ESP_UART_BRIDGE_KEEPALIVE_TIMEOUT
+                    if(config.keepalive_timeout > 0) {
                     // Use TCP keepalives to detect dead clients.
                     int val = 1;
                     setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &val,
@@ -205,10 +226,10 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                     setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPINTVL, &val,
                             sizeof(val));
                     // Number of probes to send before closing the connection.
-                    val = CONFIG_ESP_UART_BRIDGE_KEEPALIVE_TIMEOUT;
+                    val = config.keepalive_timeout;
                     setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPCNT, &val,
                             sizeof(val));
-#endif
+                    }
 
                     // Open UART.
                     uart_fd = open(uart_addr, O_RDWR);
@@ -217,7 +238,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                         close(client_fd);
                         client_fd = -1;
                     }
-                    uart_vfs_dev_use_driver(CONFIG_ESP_UART_BRIDGE_UART_NUM);
+                    uart_vfs_dev_use_driver(config.uart_num);
 
                     int flags = fcntl(uart_fd, F_GETFL, 0);
                     fcntl(uart_fd, F_SETFL, flags | O_NONBLOCK);
