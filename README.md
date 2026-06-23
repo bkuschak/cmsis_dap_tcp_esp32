@@ -10,13 +10,14 @@ This project provides the remote-side implementation of the cmsis_dap_tcp
 protocol, using an ESP32 as the remote programmer. It allows a cheap ESP32
 board to program and debug an ARM microcontroller target. Both JTAG and the
 two-wire SWD interface are supported. OpenOCD connects to the ESP32 using
-TCP/IP over WiFi, allowing remote flashing and debugging of the ARM target
+TCP/IP over WiFi, allowing remote flashing and debugging of the target
 board.
 
 ![diagram](img/cmsis_dap_tcp_diagram.svg)
 
 - Tested with the XIAO ESP32C6 and ESP32-S3-DevKitC-1 development boards as the
   programmer, and STM32F103 Blue Pill and Nucleo STM32F401RE as the targets.
+  A Lattice FPGA target has also been successfully used.
 - Either JTAG mode or SWD mode can be used to program the target. 2 GPIO are
   needed for SWD, or a minimum of 4 GPIO for JTAG.
 - An optional GPIO pin can be used to drive the NRST# (SRST) signal, but this
@@ -196,13 +197,16 @@ impact performance.
 
 # Performance
 
-A single SWD 32-bit transfer completes in about 45 microseconds, with an
-SWCLK clock rate of approximately 1 MHz. Yellow is SWCLK. Green is SWDIO.
+On the ESP32-S3 @ 240MHz, a single SWD 32-bit transfer completes in less than
+10 microseconds, with a maximum SWCLK clock rate of 5 MHz. The SWCLK duty cycle
+is not 50% and it may vary slightly from one transfer to the next. An SWD
+read cycle is pictured below. Yellow is SWCLK. Green is SWDIO.
 
-(TODO: the scope available at the time to make these measurements was very
-limited. Redo these measurements with a better scope).
+<br>
 
 ![scopeshot1](img/scopeshot1.png)
+
+<br>
 
 ![scopeshot1](img/scopeshot2.png)
 
