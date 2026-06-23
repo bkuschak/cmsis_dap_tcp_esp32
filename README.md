@@ -101,6 +101,9 @@ In menuconfig, goto to the "CMSIS-DAP configuration" page.
 
   <img src="img/menuconfig4.png" width="75%" />
 
+* If you want to support multiple independent JTAG/SWD interfaces, or use this
+  code as component in another application see [this
+  section](#new-feature-multiple-interfaces-and-usage-as-a-component)
 
 # Building and Running OpenOCD
 
@@ -337,3 +340,24 @@ downloaded 98304 bytes in 0.489488s (196.123 KiB/s)
 > dump_image /dev/null 0x20000000 0x18000
 dumped 98304 bytes in 0.832846s (115.267 KiB/s)
 ```
+
+# Multiple interfaces / usage as a component
+
+Two additional features were added by [@w531t4](https://github.com/w531t4).
+Thank you!  These currently live on the ```w531t4-feat/multi_instance_safe```
+branch and will be merged to main after further testing is completed:
+
+1) This cmsis_dap_tcp server may be incorporated as a component in another
+application.  Simply define your CMAKE_PROJECT_NAME as something other than
+“cmsis_dap_tcp_esp32”.  This will cause ```main.c``` to be left out of the
+project.  Replace the functionality of main.c with your own implementation.  Be
+sure to call ```cmsis_dap_tcp_start(NULL, "cmsis_dap_tcp_task", …);```
+
+2) A single ESP32 can now support multiple independent JTAG/SWD and UART
+interfaces. Each one has its own GPIO pins and TCP port. This can be useful you
+have multiple CPUs, MCUs, FPGAs on a board with separate JTAG chains. To do
+this, use feature #1 above and call ```cmsis_dap_tcp_start()``` once for each
+interface.  Pass a valid ```cmsis_dap_tcp_config``` parameter to define the
+GPIO pin configuration for each interface.  If you’re using the UART bridge,
+start the uart_bridge_tasks by passing a ```uart_bridge_config``` parameter for
+each interface.  These parameters will override the menuconfig settings.
