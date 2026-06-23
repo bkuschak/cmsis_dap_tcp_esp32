@@ -1,12 +1,18 @@
 set(COMPONENT_SRCS
     "DAP.c"
+    "DAP_gpio_config.c"
     "DAP_vendor.c"
     "JTAG_DP.c"
     "SWO.c"
     "SW_DP.c"
     "UART.c"
-    "cmsis_dap_tcp.c"
-    "main.c")
+    "cmsis_dap_tcp.c")
+
+# Include the app entrypoint only for the standalone firmware project, so
+# other ESP-IDF projects can consume this directory as a component.
+if(CMAKE_PROJECT_NAME STREQUAL "cmsis_dap_tcp_esp32")
+    list(APPEND COMPONENT_SRCS "main.c")
+endif()
 
 if(CONFIG_ESP_UART_BRIDGE_ENABLED)
     list(APPEND COMPONENT_SRCS "uart_bridge.c")
@@ -24,4 +30,4 @@ idf_component_register(SRCS ${COMPONENT_SRCS}
                        REQUIRES esp_timer
                        REQUIRES esp_wifi
                        REQUIRES nvs_flash
-                       INCLUDE_DIRS "")
+                       INCLUDE_DIRS ".")
