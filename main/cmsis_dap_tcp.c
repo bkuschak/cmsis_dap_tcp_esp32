@@ -297,6 +297,8 @@ void cmsis_dap_tcp_task(void *arg __attribute__((unused)))
     }
 
     set_nonblocking(listener_fd);
+    fprintf(stdout, "cmsis_dap_tcp: maximum packet size is %d bytes.\n",
+            DAP_PKT_SIZE);
     fprintf(stdout, "cmsis_dap_tcp: listening on port %d.\n", port);
 
     msgbuf_init(&buf);

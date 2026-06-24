@@ -138,8 +138,8 @@ This information includes:
 /// Maximum Package Size for Command and Response data.
 /// This configuration settings is used to optimize the communication performance with the
 /// debugger and depends on the USB peripheral. Typical vales are 64 for Full-speed USB HID or WinUSB,
-/// 1024 for High-speed USB HID and 512 for High-speed USB WinUSB.
-#define DAP_PACKET_SIZE         1024U           ///< Specifies Packet Size in bytes.
+/// 1024 for High-speed USB HID and 512 for High-speed USB WinUSB. Can be larger for TCP.
+#define DAP_PACKET_SIZE         CONFIG_ESP_DAP_TCP_MAX_PKT_SIZE
 
 /// Maximum Package Buffers for Command and Response data.
 /// This configuration settings is used to optimize the communication performance with the
