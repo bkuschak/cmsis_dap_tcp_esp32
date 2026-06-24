@@ -345,6 +345,11 @@ downloaded 98304 bytes in 0.489488s (196.123 KiB/s)
 dumped 98304 bytes in 0.832846s (115.267 KiB/s)
 ```
 
+<br>
+
+![performance](img/performance.svg)
+
+
 # Multiple interfaces / usage as a component
 
 Two additional features were added by [@w531t4](https://github.com/w531t4).
