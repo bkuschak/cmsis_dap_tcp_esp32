@@ -99,16 +99,32 @@ In menuconfig, goto to the "CMSIS-DAP configuration" page.
   the "UART to TCP/IP bridge" subpage. (Currently, the baud rate and other
   settings cannot be changed at runtime). A script ```host/uart_bridge.sh```
   is provided that uses ```socat``` to present the remote UART as a pseudo-tty
-  that can be opened using any serial terminal program on the host.
+  that can be opened using any serial terminal program on the host. The UART
+  bridge uses UART1 by default.
 
   <img src="img/menuconfig4.png" width="75%" />
 
-* If you want to support multiple independent JTAG/SWD interfaces, or use this
-  code as component in another application see [this
-  section](#multiple-interfaces-/-usage-as-a-component)
+* The console uses the native USB-Serial port. This port is non-blocking when
+  no USB host is connected (with ESP-IDF v5.1+), so the device operates
+  normally without a USB host attached.  UART0 is unused. If you want to use
+  UART0 for console instead, update the console settings in menuconfig and
+  assign the UART bridge to GPIO pins that do not conflict with the UART0
+  pins.
 
-Note: if you experience problems, additional debugging messages can be enabled
-by editing ```main/cmsis_dap_tcp.h``` and uncommenting the following line. This
+   ```
+   Component config → ESP System Settings → Channel for console output → Default UART
+   Component config → ESP System Settings → Channel for console secondary output → No secondary
+   Component config → UART Bridge → Select GPIO numbers → enabled
+   Component config → UART Bridge → UART TX → (choose an available GPIO)
+   Component config → UART Bridge → UART RX → (choose an available GPIO)
+   ```
+
+If you want to support multiple independent JTAG/SWD interfaces, or use this
+code as component in another application see [this
+section](#multiple-interfaces--usage-as-a-component) below.
+
+If you experience problems, additional debugging messages can be enabled by
+editing ```main/cmsis_dap_tcp.h``` and uncommenting the following line. This
 will impact performance.
 
 ```
