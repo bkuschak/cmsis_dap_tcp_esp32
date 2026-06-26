@@ -142,6 +142,18 @@ exit the serial monitor use ```Ctrl+]```.
 idf.py monitor
 ```
 
+Show the available console commands.
+
+```
+esp32> help
+Available commands:
+  help - Show this help message.
+  wifi "<ssid>" "<password>" [auth_mode] - Configure WiFi credentials.
+  reboot - Restart the device.
+  status - Report network status.
+esp32>
+```
+
 ## Connecting to WiFi
 
 After booting, the ESP32 will attempt to connect to WiFi. By default it will
@@ -150,7 +162,6 @@ change these credentials at runtime using the command interface on the USB
 serial console. To do this, use the ```wifi``` command and reboot afterwards:
 
 ```
-esp32> help
 esp32> wifi "my ssid" "my password" wpa2
 esp32> reboot
 ```
@@ -188,6 +199,16 @@ Disabling WiFi power savings to improve performance.
 cmsis_dap_tcp: listening on port 4441.
 UART bridge: remapping UART_TX = GPIO_NUM_16, UART_RX = GPIO_NUM_15.
 UART bridge: listening on port 4442 for UART1.
+IPv6 address (link-local): fe80:0000:0000:0000:9aa3:16ff:feec:6640
+IPv6 address (global): 2406:3400:031f:ba10:9aa3:16ff:feec:6640
+```
+
+You can check the network status at any time by using the status command:
+
+```
+esp32> status
+Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -61 dBm
+IP address: 192.168.1.107
 IPv6 address (link-local): fe80:0000:0000:0000:9aa3:16ff:feec:6640
 IPv6 address (global): 2406:3400:031f:ba10:9aa3:16ff:feec:6640
 ```

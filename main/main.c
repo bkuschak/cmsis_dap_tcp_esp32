@@ -137,6 +137,7 @@ static char mac_addr_str[16];
 static int wifi_retry_num;
 static EventGroupHandle_t wifi_event_group;
 static bool cmsis_dap_tcp_initialized;
+static bool wifi_connected;
 static esp_netif_t *sta_netif;
 
 static const char* wifi_ssid = CONFIG_ESP_WIFI_SSID;
@@ -322,6 +323,71 @@ static int reboot_cmd_handler(int argc, char **argv)
     return 0;
 }
 
+#ifdef CONFIG_LWIP_IPV6
+static const char* ipv6_type_str(esp_ip6_addr_type_t type)
+{
+    switch (type) {
+        case ESP_IP6_ADDR_IS_GLOBAL:            return "global";
+        case ESP_IP6_ADDR_IS_LINK_LOCAL:        return "link-local";
+        case ESP_IP6_ADDR_IS_UNIQUE_LOCAL:      return "unique-local";
+        case ESP_IP6_ADDR_IS_SITE_LOCAL:        return "site-local";
+        case ESP_IP6_ADDR_IS_IPV4_MAPPED_IPV6:  return "ipv4-mapped";
+        case ESP_IP6_ADDR_IS_UNKNOWN:
+        default:                                return "unknown";
+    }
+}
+#endif
+
+static int status_cmd_handler(int argc, char **argv)
+{
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+
+    if (netif == NULL) {
+        printf("WiFi interface not found.\n");
+        return 0;
+    }
+
+    if(!wifi_connected) {
+        printf("Not connected to WiFi SSID: '%s'\n", wifi_ssid);
+    }
+    else {
+        int rssi;
+        esp_wifi_sta_get_rssi(&rssi);
+        printf("Connected to WiFi SSID: '%s'. RSSI: %d dBm\n", wifi_ssid,
+                rssi);
+
+        esp_netif_ip_info_t ip_info;
+        if (esp_netif_get_ip_info(netif, &ip_info) != ESP_OK) {
+            printf("Failed reading IP address.\n");
+        }
+        else {
+            if (ip_info.ip.addr == 0) {
+                printf("No IP address assigned.\n");
+            }
+            else {
+                printf("IP address: " IPSTR "\n", IP2STR(&ip_info.ip));
+            }
+        }
+
+#ifdef CONFIG_LWIP_IPV6
+        esp_ip6_addr_t ip6_addrs[CONFIG_LWIP_IPV6_NUM_ADDRESSES];
+        int count = esp_netif_get_all_ip6(netif, ip6_addrs);
+
+        if (count == 0) {
+            printf("No IPv6 address assigned.\n");
+        }
+        for(int i=0; i<count; i++) {
+            esp_ip6_addr_type_t ipv6_type =
+                esp_netif_ip6_get_addr_type(&ip6_addrs[i]);
+
+            printf("IPv6 address (%s): " IPV6STR "\n",
+                    ipv6_type_str(ipv6_type), IPV62STR(ip6_addrs[i]));
+        }
+#endif
+    }
+    return 0;
+}
+
 static int help_cmd_handler(int argc, char **argv)
 {
     printf("Available commands:\n");
@@ -329,6 +395,7 @@ static int help_cmd_handler(int argc, char **argv)
     printf("  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure WiFi "
            "credentials.\n");
     printf("  reboot - Restart the device.\n");
+    printf("  status - Report network status.\n");
     return 0;
 }
 
@@ -379,6 +446,15 @@ static void commands_init(void)
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&reboot_cmd));
 
+    const esp_console_cmd_t status_cmd = {
+        .command = "status",
+        .help = "Show device status",
+        .hint = NULL,
+        .func = &status_cmd_handler,
+        .argtable = NULL
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&status_cmd));
+
     wifi_args.ssid = arg_str1(NULL, NULL, "<ssid>", "WiFi network SSID");
     wifi_args.password =
         arg_str1(NULL, NULL, "<password>", "WiFi network password");
@@ -413,8 +489,10 @@ static void event_handler(void* arg, esp_event_base_t event_base,
             esp_wifi_sta_get_rssi(&rssi);
             printf("Connected to WiFi SSID: '%s'. RSSI: %d dBm\n", wifi_ssid,
                     rssi);
+            wifi_connected = true;
         }
         else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+            wifi_connected = false;
             if (cmsis_dap_tcp_initialized) {
                 /* If connection is lost after we have initialized the server,
                  * any connected sockets and the server socket have been lost.
