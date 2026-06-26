@@ -137,7 +137,7 @@ static char mac_addr_str[16];
 static int wifi_retry_num;
 static EventGroupHandle_t wifi_event_group;
 static bool cmsis_dap_tcp_initialized;
-static bool wifi_connected;
+static volatile bool wifi_connected;
 static esp_netif_t *sta_netif;
 
 static const char* wifi_ssid = CONFIG_ESP_WIFI_SSID;
@@ -351,7 +351,7 @@ static int status_cmd_handler(int argc, char **argv)
         printf("Not connected to WiFi SSID: '%s'\n", wifi_ssid);
     }
     else {
-        int rssi;
+        int rssi = 0;
         esp_wifi_sta_get_rssi(&rssi);
         printf("Connected to WiFi SSID: '%s'. RSSI: %d dBm\n", wifi_ssid,
                 rssi);
@@ -385,6 +385,12 @@ static int status_cmd_handler(int argc, char **argv)
         }
 #endif
     }
+
+    cmsis_dap_print_status();
+
+#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+    uart_bridge_print_status();
+#endif
     return 0;
 }
 
@@ -485,7 +491,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
             esp_wifi_connect();
         }
         else if (event_id == WIFI_EVENT_STA_CONNECTED) {
-            int rssi;
+            int rssi = 0;
             esp_wifi_sta_get_rssi(&rssi);
             printf("Connected to WiFi SSID: '%s'. RSSI: %d dBm\n", wifi_ssid,
                     rssi);

@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 void uart_bridge_task(void* arg);
+void uart_bridge_print_status(void);
 
 #ifdef __cplusplus
 }

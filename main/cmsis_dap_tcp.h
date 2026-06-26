@@ -22,6 +22,8 @@ extern "C" {
 // Task that runs the TCP server and processes requests and responses.
 void cmsis_dap_tcp_task(void* arg);
 
+void cmsis_dap_print_status(void);
+
 #ifdef __cplusplus
 }
 #endif

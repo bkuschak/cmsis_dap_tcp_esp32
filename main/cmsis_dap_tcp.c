@@ -33,6 +33,12 @@
 #define h_u32_to_le(a)  __bswap_32(a)
 #endif
 
+#ifdef CONFIG_LWIP_IPV6
+#define MAX_INET_ADDRSTRLEN     INET6_ADDRSTRLEN
+#else
+#define MAX_INET_ADDRSTRLEN     INET_ADDRSTRLEN
+#endif
+
 // DAP_PKT_SIZE must be >= to what is used by the client (OpenOCD).
 #define DAP_PKT_SIZE            CONFIG_ESP_DAP_TCP_MAX_PKT_SIZE
 #define DAP_PKT_HDR_SIGNATURE   0x00504144   // "DAP\0" in LE
@@ -69,6 +75,11 @@ struct msgbuf_t {
 struct msgbuf_t buf;
 static uint8_t response[DAP_PKT_SIZE];
 static uint8_t packet_buf[DAP_TOTAL_PKT_SIZE];
+static char client_ip_str[MAX_INET_ADDRSTRLEN];
+static int client_port;
+static volatile bool client_connected;
+static const int listener_port = CONFIG_ESP_DAP_TCP_PORT;
+
 
 // ---------------------------------------------------------------------------
 // Use our own receive buffer to accumulate from the socket until a complete
@@ -235,19 +246,28 @@ static void set_keepalives(int fd)
 #endif
 }
 
+void cmsis_dap_print_status(void)
+{
+    if(client_connected) {
+        printf("cmsis_dap_tcp: connected to client '%s:%d'.\n",
+                client_ip_str, client_port);
+    }
+    else {
+        printf("cmsis_dap_tcp: listening on port %d.\n", listener_port);
+    }
+}
+
 void cmsis_dap_tcp_task(void *arg __attribute__((unused)))
 {
     int listener_fd;
-    int port = CONFIG_ESP_DAP_TCP_PORT;
 
 #ifdef CONFIG_LWIP_IPV6
     // Dual stack to allow both IPv4 and IPv6 listeners.
-    char ipstr[INET6_ADDRSTRLEN];
     struct sockaddr_in6 addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin6_family = AF_INET6;
     addr.sin6_addr = in6addr_any;
-    addr.sin6_port = htons(port);
+    addr.sin6_port = htons(listener_port);
 
     listener_fd = socket(AF_INET6, SOCK_STREAM, 0);
     if(listener_fd < 0) {
@@ -263,12 +283,11 @@ void cmsis_dap_tcp_task(void *arg __attribute__((unused)))
     }
     LOG_DEBUG("Listening on IPv4/IPv6 socket.");
 #else
-    char ipstr[INET_ADDRSTRLEN];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(port);
+    addr.sin_port = htons(listener_port);
 
     listener_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listener_fd < 0) {
@@ -299,13 +318,15 @@ void cmsis_dap_tcp_task(void *arg __attribute__((unused)))
     set_nonblocking(listener_fd);
     fprintf(stdout, "cmsis_dap_tcp: maximum packet size is %d bytes.\n",
             DAP_PKT_SIZE);
-    fprintf(stdout, "cmsis_dap_tcp: listening on port %d.\n", port);
+    fprintf(stdout, "cmsis_dap_tcp: listening on port %d.\n", listener_port);
 
     msgbuf_init(&buf);
 
     // Only one active client at a time is allowed.
     int client_fd = -1;
     int run __attribute__((unused)) = 0;
+    client_connected = false;
+    client_ip_str[0] = '\0';
 
     while (1) {
         struct sockaddr_storage client_addr;
@@ -345,28 +366,31 @@ void cmsis_dap_tcp_task(void *arg __attribute__((unused)))
                     continue;   // restart select() loop
                 }
 
-                int client_port = 0;
-                ipstr[0] = '\0';
+                client_port = 0;
+                client_ip_str[0] = '\0';
                 if(client_addr.ss_family == AF_INET) {
                     // IPv4
                     struct sockaddr_in* s = (void*) &client_addr;
-                    inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof(ipstr));
+                    inet_ntop(AF_INET, &s->sin_addr, client_ip_str,
+                            sizeof(client_ip_str));
                     client_port = ntohs(s->sin_port);
                 }
 #ifdef CONFIG_LWIP_IPV6
                 else {
                     // IPv6
                     struct sockaddr_in6* s = (void*) &client_addr;
-                    inet_ntop(AF_INET6, &s->sin6_addr, ipstr, sizeof(ipstr));
+                    inet_ntop(AF_INET6, &s->sin6_addr, client_ip_str,
+                            sizeof(client_ip_str));
                     client_port = ntohs(s->sin6_port);
                 }
 #endif
                 fprintf(stdout, "cmsis_dap_tcp: client connected %s:%d\n",
-                        ipstr, client_port);
+                        client_ip_str, client_port);
                 fcntl(new_fd, F_SETFL, O_NONBLOCK);
                 set_keepalives(new_fd);
                 client_fd = new_fd;
                 msgbuf_init(&buf);
+                client_connected = true;
                 continue;   // restart select() loop
             }
         }
@@ -378,6 +402,8 @@ void cmsis_dap_tcp_task(void *arg __attribute__((unused)))
                     fprintf(stdout, "cmsis_dap_tcp: client disconnected.\n");
                     close(client_fd);
                     client_fd = -1;
+                    client_connected = false;
+                    client_ip_str[0] = '\0';
                     continue;   // restart select() loop
                 }
             }
@@ -402,6 +428,8 @@ void cmsis_dap_tcp_task(void *arg __attribute__((unused)))
                     fprintf(stdout, "cmsis_dap_tcp: disconnecting.\n");
                     close(client_fd);
                     client_fd = -1;
+                    client_connected = false;
+                    client_ip_str[0] = '\0';
                     break;
                 }
             }
@@ -409,6 +437,8 @@ void cmsis_dap_tcp_task(void *arg __attribute__((unused)))
     }
 
     fprintf(stdout, "cmsis_dap_tcp: shutting down.\n");
+    client_connected = false;
+
     if (client_fd >= 0) close(client_fd);
     close(listener_fd);
     vTaskDelete(NULL);

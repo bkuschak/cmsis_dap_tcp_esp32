@@ -78,12 +78,32 @@
  _a > _b ? _a : _b; })
 #endif
 
+#ifdef CONFIG_LWIP_IPV6
+#define MAX_INET_ADDRSTRLEN     INET6_ADDRSTRLEN
+#else
+#define MAX_INET_ADDRSTRLEN     INET_ADDRSTRLEN
+#endif
+
 static char buffer[BUFFER_SIZE];
+static char client_ip_str[MAX_INET_ADDRSTRLEN];
+static int client_port;
+static volatile bool client_connected;
+static const int listener_port = CONFIG_ESP_UART_BRIDGE_TCP_PORT;
+
+void uart_bridge_print_status(void)
+{
+    if(client_connected) {
+        printf("UART bridge: connected to client '%s:%d'.\n",
+                client_ip_str, client_port);
+    }
+    else {
+        printf("UART bridge: listening on port %d.\n", listener_port);
+    }
+}
 
 void uart_bridge_task(void* __attribute__((unused)) arg)
 {
     int ret;
-    int port = CONFIG_ESP_UART_BRIDGE_TCP_PORT;
 
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listen_fd < 0) {
@@ -100,7 +120,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(port);
+    server_addr.sin_port = htons(listener_port);
     ret = bind(listen_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
     if(ret < 0) {
         perror("UART bridge: failed to bind socket");
@@ -149,8 +169,8 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
     snprintf(uart_addr, sizeof(uart_addr), "/dev/uart/%u",
             CONFIG_ESP_UART_BRIDGE_UART_NUM);
 
-    fprintf(stdout, "UART bridge: listening on port %d for UART%u.\n", port,
-            CONFIG_ESP_UART_BRIDGE_UART_NUM);
+    fprintf(stdout, "UART bridge: listening on port %d for UART%u.\n",
+            listener_port, CONFIG_ESP_UART_BRIDGE_UART_NUM);
 
     // Select() loop blocks until activity on sockets or UART.
     struct sockaddr_in client_addr;
@@ -192,9 +212,11 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                     // New client.
                     fcntl(new_fd, F_SETFL, O_NONBLOCK);
                     client_fd = new_fd;
+                    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip_str,
+                            sizeof(client_ip_str));
+                    client_port = ntohs(client_addr.sin_port);
                     fprintf(stdout, "UART bridge: client connected %s:%d\n",
-                            inet_ntoa(client_addr.sin_addr),
-                            ntohs(client_addr.sin_port));
+                            client_ip_str, client_port);
 
 #ifdef CONFIG_ESP_UART_BRIDGE_KEEPALIVE_TIMEOUT
                     // Use TCP keepalives to detect dead clients.
@@ -224,6 +246,8 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                     int flags = fcntl(uart_fd, F_GETFL, 0);
                     fcntl(uart_fd, F_SETFL, flags | O_NONBLOCK);
 
+                    client_connected = true;
+
                     // Restart select() loop.
                     continue;
                 }
@@ -246,6 +270,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                 close(uart_fd);
                 client_fd = -1;
                 uart_fd = -1;
+                client_connected = false;
                 continue;       // restart select() loop
             }
             else if(ret < 0) {
@@ -271,6 +296,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
     }
 
     fprintf(stdout, "UART bridge: shutting down.\n");
+    client_connected = false;
 
     if(client_fd >= 0)
         close(client_fd);
