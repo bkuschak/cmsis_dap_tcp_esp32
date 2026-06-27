@@ -66,7 +66,7 @@
 #define GPIO_NRESET             CONFIG_ESP_DAP_GPIO_NRESET
 #endif
 
-#ifdef CONFIG_ESP_DAP_LED_SUPPORTED
+#if defined(CONFIG_ESP_DAP_LED_STANDARD) || defined(CONFIG_ESP_DAP_LED_RGB)
 #define GPIO_LED                CONFIG_ESP_DAP_GPIO_LED
 #endif
 
@@ -86,6 +86,9 @@ This information includes:
 
 #include <esp_timer.h>
 #include "device_config.h"
+#ifdef CONFIG_ESP_DAP_LED_RGB
+#include "ws2812_led.h"
+#endif
 
 /// Processor Clock of the Cortex-M MCU used in the Debug Unit.
 /// This value is used to calculate the SWD/JTAG clock speed.
@@ -718,7 +721,14 @@ It is recommended to provide the following LEDs for status indication:
 */
 __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit)
 {
-#ifdef GPIO_LED
+#if CONFIG_ESP_DAP_LED_RGB
+    if(bit & 1)
+        set_rgb_led(CONFIG_ESP_DAP_LED_RGB_INTENSITY_R,
+                    CONFIG_ESP_DAP_LED_RGB_INTENSITY_G,
+                    CONFIG_ESP_DAP_LED_RGB_INTENSITY_B);
+    else
+        set_rgb_led(0, 0, 0);
+#elif defined(CONFIG_ESP_DAP_LED_STANDARD)
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
 #ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
     gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, bit);
@@ -800,7 +810,9 @@ __STATIC_INLINE void DAP_SETUP (void)
 #ifdef GPIO_LED
     gpio_reset_pin(GPIO_LED);
 #endif
-#ifdef GPIO_LED
+#ifdef CONFIG_ESP_DAP_LED_RGB
+    set_rgb_led(0, 0, 0);
+#elif defined(CONFIG_ESP_DAP_LED_STANDARD)
 #ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
     gpio_set_level(GPIO_LED, 0);
 #else
