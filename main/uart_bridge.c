@@ -89,12 +89,15 @@ static char client_ip_str[MAX_INET_ADDRSTRLEN];
 static int client_port;
 static volatile bool client_connected;
 static const int listener_port = CONFIG_ESP_UART_BRIDGE_TCP_PORT;
+static unsigned long count_rx;
+static unsigned long count_tx;
 
 void uart_bridge_print_status(void)
 {
     if(client_connected) {
-        printf("UART bridge: connected to client '%s:%d'.\n",
-                client_ip_str, client_port);
+        printf("UART bridge: connected to client '%s:%d'. TX: %lu bytes, RX: "
+                "%lu bytes.\n", client_ip_str, client_port, count_tx,
+                count_rx);
     }
     else {
         printf("UART bridge: listening on port %d.\n", listener_port);
@@ -156,9 +159,14 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                 &uart_config));
 
 #ifdef CONFIG_ESP_UART_BRIDGE_REMAP_PINS
-    fprintf(stderr, "UART bridge: remapping UART_TX = GPIO_NUM_%u, UART_RX = "
-            "GPIO_NUM_%u.\n", CONFIG_ESP_UART_BRIDGE_TXD_PIN,
+    fprintf(stderr, "UART bridge: remapping UART%d TX = GPIO_NUM_%u, RX = "
+            "GPIO_NUM_%u.\n", CONFIG_ESP_UART_BRIDGE_UART_NUM,
+            CONFIG_ESP_UART_BRIDGE_TXD_PIN,
             CONFIG_ESP_UART_BRIDGE_RXD_PIN);
+    ESP_ERROR_CHECK(gpio_set_direction(CONFIG_ESP_UART_BRIDGE_RXD_PIN,
+                GPIO_MODE_INPUT));
+    ESP_ERROR_CHECK(gpio_set_direction(CONFIG_ESP_UART_BRIDGE_TXD_PIN,
+                GPIO_MODE_INPUT));
     ESP_ERROR_CHECK(uart_set_pin(CONFIG_ESP_UART_BRIDGE_UART_NUM,
                 CONFIG_ESP_UART_BRIDGE_TXD_PIN, CONFIG_ESP_UART_BRIDGE_RXD_PIN,
                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
@@ -246,6 +254,8 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                     int flags = fcntl(uart_fd, F_GETFL, 0);
                     fcntl(uart_fd, F_SETFL, flags | O_NONBLOCK);
 
+                    count_rx = 0;
+                    count_tx = 0;
                     client_connected = true;
 
                     // Restart select() loop.
@@ -270,6 +280,8 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                 close(uart_fd);
                 client_fd = -1;
                 uart_fd = -1;
+                count_rx = 0;
+                count_tx = 0;
                 client_connected = false;
                 continue;       // restart select() loop
             }
@@ -279,6 +291,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
             }
             else {
                 write(uart_fd, buffer, ret);
+                count_tx += ret;
             }
         }
 
@@ -290,6 +303,7 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
                     perror("UART bridge: UART read error");
             }
             else {
+                count_rx += ret;
                 send(client_fd, buffer, ret, 0);
             }
         }
@@ -297,6 +311,8 @@ void uart_bridge_task(void* __attribute__((unused)) arg)
 
     fprintf(stdout, "UART bridge: shutting down.\n");
     client_connected = false;
+    count_rx = 0;
+    count_tx = 0;
 
     if(client_fd >= 0)
         close(client_fd);
