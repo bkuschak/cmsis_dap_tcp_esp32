@@ -17,12 +17,6 @@ if(CONFIG_ESP_PRINT_CPU_USAGE)
 endif()
 
 idf_component_register(SRCS ${COMPONENT_SRCS}
-                       PRIV_REQUIRES spi_flash
-                       REQUIRES driver
-                       REQUIRES lwip
-                       REQUIRES esp_event
-                       REQUIRES esp_timer
-                       REQUIRES esp_wifi
-                       REQUIRES nvs_flash
-                       REQUIRES console
+                       PRIV_REQUIRES spi_flash esp_driver_gpio esp_driver_uart
+                       REQUIRES lwip esp_event esp_timer esp_wifi nvs_flash console
                        INCLUDE_DIRS "")

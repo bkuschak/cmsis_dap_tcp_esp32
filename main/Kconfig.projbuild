@@ -266,7 +266,7 @@ menu "CMSIS-DAP configuration"
 
     config ESP_DAP_TCP_MAX_PKT_SIZE
         int "CMSIS-DAP maximum packet size"
-        default 1024
+        default 4096
         help
             Choose the maximum size of a CMSIS-DAP request or response.
             Should be >= to that used by the client.
@@ -311,9 +311,9 @@ menu "CMSIS-DAP configuration"
         default n
         select FREERTOS_USE_TRACE_FACILITY
         select FREERTOS_GENERATE_RUN_TIME_STATS
-        select FREERTOS_RUN_TIME_COUNTER_TYPE_U64
         help
             For debugging, periodically print CPU usage of each task to the
-            console.
+            console. Also manually enable FREERTOS_RUN_TIME_COUNTER_TYPE_U64
+            to avoid counter overflow.
 
 endmenu
