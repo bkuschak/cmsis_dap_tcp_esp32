@@ -1,1 +1,3 @@
 wifi_password.h
+build*/
+**/sdkconfig
