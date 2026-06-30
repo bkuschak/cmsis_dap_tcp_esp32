@@ -78,6 +78,10 @@
 #include "cmsis_dap_tcp.h"
 #include "uart_bridge.h"
 
+#ifdef CONFIG_ESP_DAP_LED_RGB
+#include "ws2812_led.h"
+#endif
+
 #ifdef CONFIG_ESP_WIFI_CONSOLE_COMMANDS
 #define NVS_NAMESPACE           "wifi_config"
 #define NVS_KEY_SSID            "ssid"
@@ -154,7 +158,7 @@ static void reboot(void)
 {
     fflush(stdout);
     fflush(stderr);
-    vTaskDelay(1000);
+    vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();      // Does not return.
 }
 

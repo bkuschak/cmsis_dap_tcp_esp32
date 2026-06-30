@@ -24,7 +24,8 @@ board.
   is typically not required.
 - In JTAG mode, an optional GPIO pin can be used to drive the TRST signal, but
   this is typically not required.
-- A separate GPIO may be used to control an activity LED.
+- A separate GPIO can drive an activity LED controlled by OpenOCD (standard or
+  RGB LED).
 - UART to TCP/IP bridge can be enabled to provide access to the target board's
   serial console remotely, using an ESP32 UART.
 - Typical performance:
@@ -57,7 +58,7 @@ The software has some limitations:
 
 This code requires the ESP-IDF build tools. Refer to the official
 [installation guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation)
-and install them first.
+and install them first. This code was tested against ESP-IDF v6.0.
 
 Activate your ESP-IDF virtual environment:
 
@@ -92,8 +93,8 @@ In menuconfig, goto to the "CMSIS-DAP configuration" page.
   <img src="img/menuconfig2.png" width="75%" />
 
 * If needed, you can change the GPIO port pins for JTAG, SWD, reset, and LED on
-  the "GPIO number assignments" subpage. The signals can be disabled if they are
-  not needed.
+  the "GPIO number assignments" subpage. The signals can be disabled if they
+  are not needed.
 
   <img src="img/menuconfig3.png" width="75%" />
 
@@ -274,6 +275,16 @@ dd if=/dev/random of=random_96kb.bin bs=1024 count=96
               -c "load_image random_96kb.bin 0x20000000" \
               -c "dump_image /dev/null 0x20000000 0x18000" \
               -c "shutdown"
+```
+
+The LED normally illuminates whenever OpenOCD is connected to the ESP32. If you
+want to control it manually or from scripts, you can use this OpenOCD command
+to turn it off / on:
+
+```
+# cmsis-dap cmd <Command_ID 0x01> <LED_Selection> <LED_State>
+cmsis-dap cmd 0x01 0x00 0x00
+cmsis-dap cmd 0x01 0x00 0x01
 ```
 
 Once everything is working you may disconnect the ESP32 from your PC and run
