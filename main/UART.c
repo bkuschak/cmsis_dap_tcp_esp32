@@ -596,6 +596,9 @@ uint32_t UART_Transfer (const uint8_t *request, uint8_t *response) {
     }
 
     rx_data = (response+5);
+    if (rx_cnt > DAP_UART_RX_BUFFER_SIZE) {
+      rx_cnt = DAP_UART_RX_BUFFER_SIZE;
+    }
     index = UartRxIndexO & (DAP_UART_RX_BUFFER_SIZE - 1U);
     if ((index + rx_cnt) <= DAP_UART_RX_BUFFER_SIZE) {
       memcpy( rx_data,      &UartRxBuf[index], rx_cnt);
