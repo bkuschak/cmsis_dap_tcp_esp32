@@ -174,6 +174,14 @@ esp32> wifi "" ""
 esp32> reboot
 ```
 
+If you must use an open WiFi without encryption, specify ```open``` with an
+empty password:
+
+```
+esp32> wifi "guest wifi" "" open
+esp32> reboot
+```
+
 After the ESP32 has connected to WiFi and obtained an IP address by DHCP you
 can then run OpenOCD. The ESP32 will print status and error messages to the
 console, including the WiFi connection status and IP address. A message is
