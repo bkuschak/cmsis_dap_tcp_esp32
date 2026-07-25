@@ -681,7 +681,7 @@ static BaseType_t cmsis_dap_tcp_task_start(void)
 #else
             .nreset = -1,
 #endif
-#ifdef CONFIG_ESP_DAP_LED_SUPPORTED
+#if defined(CONFIG_ESP_DAP_LED_STANDARD) || defined(CONFIG_ESP_DAP_LED_RGB)
             .led = CONFIG_ESP_DAP_GPIO_LED,
 #else
             .led = -1,
