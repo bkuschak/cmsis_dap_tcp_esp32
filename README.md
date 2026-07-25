@@ -35,7 +35,9 @@ board.
   6 seconds for a 64KB image.
   - Performance depends on the quality of your WiFi network.
 
-![pinout](img/xiao_esp32c6_pinout.png)
+![Xiao ESP32-C6 pinout](img/xiao_esp32c6_pinout.png)
+
+![ESP32-S3-Devkit-C1 pinout](img/esp32s3_devkitc_1.png)
 
 The CMSIS-DAP code came from the Firmware directory of the [CMSIS-DAP
 repo](https://github.com/ARM-software/CMSIS-DAP). ```DAP_config.h``` was then
