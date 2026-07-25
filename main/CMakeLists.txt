@@ -24,9 +24,8 @@ endif()
 
 idf_component_register(SRCS ${COMPONENT_SRCS}
                        PRIV_REQUIRES spi_flash
-                       REQUIRES driver
+                       PRIV_REQUIRES esp_driver_gpio
                        REQUIRES lwip
-                       REQUIRES esp_driver_gpio
                        REQUIRES esp_driver_uart
                        REQUIRES esp_event
                        REQUIRES esp_timer
