@@ -21,10 +21,6 @@ struct cmsis_dap_gpio_config {
 
 extern __thread const struct cmsis_dap_gpio_config *cmsis_dap_gpio_config;
 
-// Initialize GPIO config with build-time defaults. Callers can then override
-// per-instance fields; optional pins are initialized to -1 when unavailable.
-void cmsis_dap_gpio_config_init(struct cmsis_dap_gpio_config *gpio);
-
 int cmsis_dap_gpio_config_conflicts(
         const struct cmsis_dap_gpio_config *a,
         const struct cmsis_dap_gpio_config *b);

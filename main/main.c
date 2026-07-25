@@ -627,6 +627,114 @@ int wifi_init(void)
     return -1;      // Failure.
 }
 
+static BaseType_t cmsis_dap_tcp_task_start(void)
+{
+    // Configure one CMSIS-DAP-TCP task. Static: must remain valid for the
+    // task's lifetime, per cmsis_dap_tcp_start()'s contract.
+    static struct cmsis_dap_tcp_config config = {
+        .port = CONFIG_ESP_DAP_TCP_PORT,
+#ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
+        .disable_keepalive = false,
+        .keepalive_timeout = CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT,
+#else
+        .disable_keepalive = true,
+        .keepalive_timeout = 0,
+#endif
+        .gpio = {
+#if defined(CONFIG_ESP_DAP_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_SWD_SUPPORTED)
+            .swclk_tck = CONFIG_ESP_DAP_GPIO_SWCLK_TCK,
+            .swdio_tms = CONFIG_ESP_DAP_GPIO_SWDIO_TMS,
+#else
+            .swclk_tck = -1,
+            .swdio_tms = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_JTAG_SUPPORTED
+            .tdi = CONFIG_ESP_DAP_GPIO_TDI,
+            .tdo = CONFIG_ESP_DAP_GPIO_TDO,
+#else
+            .tdi = -1,
+            .tdo = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_JTAG_NTRST_SUPPORTED
+            .ntrst = CONFIG_ESP_DAP_GPIO_NTRST,
+#else
+            .ntrst = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_NRESET_SUPPORTED
+            .nreset = CONFIG_ESP_DAP_GPIO_NRESET,
+#else
+            .nreset = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_LED_SUPPORTED
+            .led = CONFIG_ESP_DAP_GPIO_LED,
+#else
+            .led = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
+            .led_active_high = true,
+#else
+            .led_active_high = false,
+#endif
+            .io_port_write_cycles = CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES,
+            .delay_slow_cycles = CONFIG_ESP_DAP_DELAY_SLOW_CYCLES,
+        },
+    };
+
+    BaseType_t ret = cmsis_dap_tcp_start(&config, "cmsis_dap_tcp_task", NULL);
+    if(ret == pdPASS)
+        cmsis_dap_tcp_initialized = true;
+    return ret;
+}
+
+static BaseType_t uart_bridge_task_start(void)
+{
+    // Configure one UART bridge task.
+    static const struct uart_bridge_config config = {
+        .port       = CONFIG_ESP_UART_BRIDGE_TCP_PORT,
+        .uart_num   = CONFIG_ESP_UART_BRIDGE_UART_NUM,
+#ifdef CONFIG_ESP_UART_BRIDGE_USE_KEEPALIVE
+        .keepalive_timeout = CONFIG_ESP_UART_BRIDGE_KEEPALIVE_TIMEOUT,
+#else
+        .keepalive_timeout = 0,
+#endif
+#ifdef CONFIG_ESP_UART_BRIDGE_REMAP_PINS
+        .txd_pin    = CONFIG_ESP_UART_BRIDGE_TXD_PIN,
+        .rxd_pin    = CONFIG_ESP_UART_BRIDGE_RXD_PIN,
+#else
+        .txd_pin    = UART_PIN_NO_CHANGE,
+        .rxd_pin    = UART_PIN_NO_CHANGE,
+#endif
+        .baud_rate  = CONFIG_ESP_UART_BRIDGE_BAUD_RATE,
+#if defined(CONFIG_ESP_UART_BRIDGE_PARITY_NONE)
+        .parity     = UART_PARITY_DISABLE,
+#elif defined(CONFIG_ESP_UART_BRIDGE_PARITY_EVEN)
+        .parity     = UART_PARITY_EVEN,
+#elif defined(CONFIG_ESP_UART_BRIDGE_PARITY_ODD)
+        .parity     = UART_PARITY_ODD,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_PARITY."
+#endif
+
+#if CONFIG_ESP_UART_BRIDGE_DATA_BITS == 7
+        .data_bits  = UART_DATA_7_BITS,
+#elif CONFIG_ESP_UART_BRIDGE_DATA_BITS == 8
+        .data_bits  = UART_DATA_8_BITS,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_DATA_BITS."
+#endif
+
+#if CONFIG_ESP_UART_BRIDGE_STOP_BITS == 1
+        .stop_bits  = UART_STOP_BITS_1,
+#elif CONFIG_ESP_UART_BRIDGE_STOP_BITS == 2
+        .stop_bits  = UART_STOP_BITS_2,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_STOP_BITS."
+#endif
+    };
+
+    return uart_bridge_start(&config, "uart_bridge_task", NULL);
+}
+
 void app_main(void)
 {
     // DAP_Setup() runs in cmsis_dap_tcp_task(), which owns the task-local DAP
@@ -694,12 +802,15 @@ void app_main(void)
         reboot();
     }
 
-#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
-    xTaskCreate(uart_bridge_task, "uart_bridge_task", 4096, NULL, 5, NULL);
-#endif
+    if(cmsis_dap_tcp_task_start() != pdPASS) {
+        printf("Failed to start CMSIS-DAP-TCP task.\n");
+    }
 
-    cmsis_dap_tcp_start(NULL, "cmsis_dap_tcp_task", NULL);
-    cmsis_dap_tcp_initialized = true;
+#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+    if(uart_bridge_task_start() != pdPASS) {
+        printf("Failed to start UART bridge task.\n");
+    }
+#endif
 
 #ifdef CONFIG_ESP_PRINT_CPU_USAGE
     xTaskCreatePinnedToCore(cpu_usage_task, "cpu_usage", 4096, NULL,

@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+#include <driver/uart.h>
+
 struct uart_bridge_config {
     int port;
     int keepalive_timeout;
@@ -12,12 +14,14 @@ struct uart_bridge_config {
     int txd_pin;
     int rxd_pin;
     int baud_rate;
-    int data_bits;
-    int parity;
-    int stop_bits;
+    uart_word_length_t data_bits;
+    uart_parity_t parity;
+    uart_stop_bits_t stop_bits;
 };
 
-void uart_bridge_task(void* arg);
+// Start the UART bridge task.
+BaseType_t uart_bridge_start(const struct uart_bridge_config *config,
+        const char *task_name, TaskHandle_t *handle);
 
 #ifdef __cplusplus
 }

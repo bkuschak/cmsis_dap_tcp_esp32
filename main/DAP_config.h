@@ -50,30 +50,26 @@
 
 // Board-specific defines come from the sdkconfig file.
 #if defined(CONFIG_ESP_DAP_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_SWD_SUPPORTED)
-#define GPIO_SWCLK_TCK          (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->swclk_tck : CONFIG_ESP_DAP_GPIO_SWCLK_TCK)
-#define GPIO_SWDIO_TMS          (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->swdio_tms : CONFIG_ESP_DAP_GPIO_SWDIO_TMS)
+#define GPIO_SWCLK_TCK          (cmsis_dap_gpio_config->swclk_tck)
+#define GPIO_SWDIO_TMS          (cmsis_dap_gpio_config->swdio_tms)
 #endif
 
 #ifdef CONFIG_ESP_DAP_JTAG_SUPPORTED
-#define GPIO_TDI                (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->tdi : CONFIG_ESP_DAP_GPIO_TDI)
-#define GPIO_TDO                (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->tdo : CONFIG_ESP_DAP_GPIO_TDO)
+#define GPIO_TDI                (cmsis_dap_gpio_config->tdi)
+#define GPIO_TDO                (cmsis_dap_gpio_config->tdo)
 #endif
 
 #ifdef CONFIG_ESP_DAP_JTAG_NTRST_SUPPORTED
-#define GPIO_NTRST              (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->ntrst : CONFIG_ESP_DAP_GPIO_NTRST)
+#define GPIO_NTRST              (cmsis_dap_gpio_config->ntrst)
 #endif
 
 #ifdef CONFIG_ESP_DAP_NRESET_SUPPORTED
-#define GPIO_NRESET             (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->nreset : CONFIG_ESP_DAP_GPIO_NRESET)
+#define GPIO_NRESET             (cmsis_dap_gpio_config->nreset)
 #endif
 
 #ifdef CONFIG_ESP_DAP_LED_SUPPORTED
-#define GPIO_LED                (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->led : CONFIG_ESP_DAP_GPIO_LED)
-#ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
-#define GPIO_LED_ACTIVE_HIGH    (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->led_active_high : 1)
-#else
-#define GPIO_LED_ACTIVE_HIGH    (cmsis_dap_gpio_config ? cmsis_dap_gpio_config->led_active_high : 0)
-#endif
+#define GPIO_LED                (cmsis_dap_gpio_config->led)
+#define GPIO_LED_ACTIVE_HIGH    (cmsis_dap_gpio_config->led_active_high)
 #endif
 
 #define GPIO_PIN_VALID(pin)     ((pin) >= 0)
@@ -106,17 +102,11 @@ This information includes:
 /// require 2 processor cycles for a I/O Port Write operation.  If the Debug Unit uses
 /// a Cortex-M0+ processor with high-speed peripheral I/O only 1 processor cycle might be
 /// required.
-#define IO_PORT_WRITE_CYCLES    ((cmsis_dap_gpio_config && \
-                                  cmsis_dap_gpio_config->io_port_write_cycles > 0) ? \
-                                  cmsis_dap_gpio_config->io_port_write_cycles : \
-                                  CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES)
+#define IO_PORT_WRITE_CYCLES    (cmsis_dap_gpio_config->io_port_write_cycles)
 
 // Configurable delay for SWD/JTAG clock generation.
 // Number of CPU clock cycles for one iteration.
-#define DELAY_SLOW_CYCLES       ((cmsis_dap_gpio_config && \
-                                  cmsis_dap_gpio_config->delay_slow_cycles > 0) ? \
-                                  cmsis_dap_gpio_config->delay_slow_cycles : \
-                                  CONFIG_ESP_DAP_DELAY_SLOW_CYCLES)
+#define DELAY_SLOW_CYCLES       (cmsis_dap_gpio_config->delay_slow_cycles)
 
 /// Indicate that Serial Wire Debug (SWD) communication mode is available at the Debug Access Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.

@@ -38,7 +38,7 @@
 #define DAP_PKT_HDR_SIGNATURE   0x00504144   // "DAP\0" in LE
 #define DAP_PKT_TYPE_REQUEST    0x01
 #define DAP_PKT_TYPE_RESPONSE   0x02
-#define CMSIS_DAP_TCP_MAX_ACTIVE 4
+#define CMSIS_DAP_TCP_MAX_TASKS 4
 
 #ifndef MAX
 #define MAX(a, b)               \
@@ -67,21 +67,19 @@ struct msgbuf_t {
     size_t   len;
 };
 
-// Keep TCP packet buffers in task-owned state instead of file-scope globals, so
-// multiple server tasks would not share request/response scratch space.
+// Keep TCP packet buffers in task-owned state instead of file-scope globals,
+// so multiple server tasks would not share request/response scratch space.
+// Also doubles as the per-task registry entry used for port/GPIO conflict
+// detection, and (eventually) for a "list active instances" status command.
 struct cmsis_dap_tcp_state {
+    const struct cmsis_dap_tcp_config *config;
     struct msgbuf_t buf;
     uint8_t response[DAP_PKT_SIZE];
     uint8_t packet_buf[DAP_TOTAL_PKT_SIZE];
 };
 
-struct cmsis_dap_tcp_resources {
-    int port;
-    struct cmsis_dap_gpio_config gpio;
-};
-
-static struct cmsis_dap_tcp_resources active_resources[CMSIS_DAP_TCP_MAX_ACTIVE];
-static portMUX_TYPE active_resources_mux = portMUX_INITIALIZER_UNLOCKED;
+static struct cmsis_dap_tcp_state *task_states[CMSIS_DAP_TCP_MAX_TASKS];
+static portMUX_TYPE task_states_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // ---------------------------------------------------------------------------
 // Use our own receive buffer to accumulate from the socket until a complete
@@ -231,7 +229,7 @@ static void set_nonblocking(int fd)
 
 static void set_keepalives(int fd, const struct cmsis_dap_tcp_config *config)
 {
-    if (config && config->disable_keepalive)
+    if (config->disable_keepalive)
         return;
 
 #ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
@@ -245,8 +243,7 @@ static void set_keepalives(int fd, const struct cmsis_dap_tcp_config *config)
     setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val));
 
     // Number of probes to send before closing the connection.
-    val = config && config->keepalive_timeout > 0 ?
-            config->keepalive_timeout : CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT;
+    val = config->keepalive_timeout;
     setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
 
     LOG_DEBUG("cmsis_dap_tcp: Using TCP keepalives with %d second "
@@ -254,41 +251,26 @@ static void set_keepalives(int fd, const struct cmsis_dap_tcp_config *config)
 #endif
 }
 
-static void get_effective_gpio_config(const struct cmsis_dap_tcp_config *config,
-        struct cmsis_dap_gpio_config *gpio)
-{
-    if (config && config->gpio) {
-        *gpio = *config->gpio;
-        return;
-    }
-
-    cmsis_dap_gpio_config_init(gpio);
-}
-
-static int reserve_resources(const struct cmsis_dap_tcp_config *config,
-        int port, struct cmsis_dap_tcp_resources *resources)
+static int reserve_resources(struct cmsis_dap_tcp_state *state)
 {
     int slot = -1;
-    resources->port = port;
-    get_effective_gpio_config(config, &resources->gpio);
 
-    portENTER_CRITICAL(&active_resources_mux);
-    for (int i = 0; i < CMSIS_DAP_TCP_MAX_ACTIVE; i++) {
-        if (active_resources[i].port == 0) {
+    portENTER_CRITICAL(&task_states_mux);
+    for (int i = 0; i < CMSIS_DAP_TCP_MAX_TASKS; i++) {
+        if (task_states[i] == NULL) {
             if (slot < 0)
                 slot = i;
-            continue;
         }
-        if (active_resources[i].port == resources->port ||
-                cmsis_dap_gpio_config_conflicts(&active_resources[i].gpio,
-                        &resources->gpio)) {
-            portEXIT_CRITICAL(&active_resources_mux);
+        else if (task_states[i]->config->port == state->config->port ||
+                cmsis_dap_gpio_config_conflicts(&task_states[i]->config->gpio,
+                        &state->config->gpio)) {
+            portEXIT_CRITICAL(&task_states_mux);
             return -1;
         }
     }
     if (slot >= 0)
-        active_resources[slot] = *resources;
-    portEXIT_CRITICAL(&active_resources_mux);
+        task_states[slot] = state;
+    portEXIT_CRITICAL(&task_states_mux);
 
     return slot;
 }
@@ -298,14 +280,17 @@ static void release_resources(int slot)
     if (slot < 0)
         return;
 
-    portENTER_CRITICAL(&active_resources_mux);
-    active_resources[slot].port = 0;
-    portEXIT_CRITICAL(&active_resources_mux);
+    portENTER_CRITICAL(&task_states_mux);
+    task_states[slot] = NULL;
+    portEXIT_CRITICAL(&task_states_mux);
 }
 
 BaseType_t cmsis_dap_tcp_start(const struct cmsis_dap_tcp_config *config,
         const char *task_name, TaskHandle_t *handle)
 {
+    if(config == NULL)
+        return pdFAIL;
+
     return xTaskCreate(cmsis_dap_tcp_task,
             task_name ? task_name : "cmsis_dap_tcp_task",
             CMSIS_DAP_TCP_TASK_STACK_SIZE, (void *) config,
@@ -316,16 +301,24 @@ void cmsis_dap_tcp_task(void *arg)
 {
     int listener_fd;
     const struct cmsis_dap_tcp_config *config = arg;
-    int port = config && config->port > 0 ? config->port : CONFIG_ESP_DAP_TCP_PORT;
-    struct cmsis_dap_tcp_resources resources;
-    int resources_slot = reserve_resources(config, port, &resources);
+
+    struct cmsis_dap_tcp_state *state = calloc(1, sizeof(*state));
+    if (state == NULL) {
+        perror("cmsis_dap_tcp: failed to allocate task state");
+        vTaskDelete(NULL);
+        return;
+    }
+    state->config = config;
+
+    int resources_slot = reserve_resources(state);
     if (resources_slot < 0) {
         fprintf(stderr, "cmsis_dap_tcp: resource conflict on port or JTAG pins.\n");
+        free(state);
         vTaskDelete(NULL);
         return;
     }
 
-    cmsis_dap_gpio_config = config ? config->gpio : NULL;
+    cmsis_dap_gpio_config = &config->gpio;
     DAP_Setup();
 
 #ifdef CONFIG_LWIP_IPV6
@@ -335,12 +328,13 @@ void cmsis_dap_tcp_task(void *arg)
     memset(&addr, 0, sizeof(addr));
     addr.sin6_family = AF_INET6;
     addr.sin6_addr = in6addr_any;
-    addr.sin6_port = htons(port);
+    addr.sin6_port = htons(config->port);
 
     listener_fd = socket(AF_INET6, SOCK_STREAM, 0);
     if(listener_fd < 0) {
         perror("cmsis_dap_tcp: Failed to create listening socket.");
         release_resources(resources_slot);
+        free(state);
         vTaskDelete(NULL);
         return;
     }
@@ -357,12 +351,13 @@ void cmsis_dap_tcp_task(void *arg)
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(port);
+    addr.sin_port = htons(config->port);
 
     listener_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listener_fd < 0) {
         perror("cmsis_dap_tcp: Failed to create listening socket.");
         release_resources(resources_slot);
+        free(state);
         vTaskDelete(NULL);
         return;
     }
@@ -376,6 +371,7 @@ void cmsis_dap_tcp_task(void *arg)
         perror("cmsis_dap_tcp: failed to bind socket");
         close(listener_fd);
         release_resources(resources_slot);
+        free(state);
         vTaskDelete(NULL);
         return;
     }
@@ -384,6 +380,7 @@ void cmsis_dap_tcp_task(void *arg)
         perror("cmsis_dap_tcp: failed to listen on socket");
         close(listener_fd);
         release_resources(resources_slot);
+        free(state);
         vTaskDelete(NULL);
         return;
     }
@@ -391,16 +388,7 @@ void cmsis_dap_tcp_task(void *arg)
     set_nonblocking(listener_fd);
     fprintf(stdout, "cmsis_dap_tcp: maximum packet size is %d bytes.\n",
             DAP_PKT_SIZE);
-    fprintf(stdout, "cmsis_dap_tcp: listening on port %d.\n", port);
-
-    struct cmsis_dap_tcp_state *state = calloc(1, sizeof(*state));
-    if (state == NULL) {
-        perror("cmsis_dap_tcp: failed to allocate task state");
-        close(listener_fd);
-        release_resources(resources_slot);
-        vTaskDelete(NULL);
-        return;
-    }
+    fprintf(stdout, "cmsis_dap_tcp: listening on port %d.\n", config->port);
 
     msgbuf_init(&state->buf);
 
@@ -512,7 +500,7 @@ void cmsis_dap_tcp_task(void *arg)
     fprintf(stdout, "cmsis_dap_tcp: shutting down.\n");
     if (client_fd >= 0) close(client_fd);
     close(listener_fd);
-    free(state);
     release_resources(resources_slot);
+    free(state);
     vTaskDelete(NULL);
 }

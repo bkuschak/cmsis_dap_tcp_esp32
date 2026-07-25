@@ -25,6 +25,9 @@
  *     CONFIG_ESP_UART_BRIDGE_DATA_BITS
  *     CONFIG_ESP_UART_BRIDGE_PARITY
  *     CONFIG_ESP_UART_BRIDGE_STOP_BITS
+ *
+ * This code supports multiple UART bridges operating simultaneously on
+ * different TCP/IP ports, if the hardware has enough available UARTs.
  */
 
 #include "driver/gpio.h"
@@ -45,31 +48,8 @@
 #define BUFFER_SIZE         512
 #define UART_BUFFER_SIZE    512
 
-#if defined(CONFIG_ESP_UART_BRIDGE_PARITY_NONE)
-#define UART_PARITY  UART_PARITY_DISABLE
-#elif defined(CONFIG_ESP_UART_BRIDGE_PARITY_EVEN)
-#define UART_PARITY  UART_PARITY_EVEN
-#elif defined(CONFIG_ESP_UART_BRIDGE_PARITY_ODD)
-#define UART_PARITY  UART_PARITY_ODD
-#else
-#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_PARITY."
-#endif
-
-#if CONFIG_ESP_UART_BRIDGE_DATA_BITS == 7
-#define UART_DATA_BITS      UART_DATA_7_BITS
-#elif CONFIG_ESP_UART_BRIDGE_DATA_BITS == 8
-#define UART_DATA_BITS      UART_DATA_8_BITS
-#else
-#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_DATA_BITS."
-#endif
-
-#if CONFIG_ESP_UART_BRIDGE_STOP_BITS == 1
-#define UART_STOP_BITS      UART_STOP_BITS_1
-#elif CONFIG_ESP_UART_BRIDGE_STOP_BITS == 2
-#define UART_STOP_BITS      UART_STOP_BITS_2
-#else
-#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_STOP_BITS."
-#endif
+#define UART_BRIDGE_TASK_STACK_SIZE     4096
+#define UART_BRIDGE_TASK_PRIORITY       5
 
 #ifndef MAX
 #define MAX(a,b) \
@@ -78,32 +58,9 @@
  _a > _b ? _a : _b; })
 #endif
 
-static const struct uart_bridge_config default_uart_bridge_config = {
-    .port       = CONFIG_ESP_UART_BRIDGE_TCP_PORT,
-#ifdef CONFIG_ESP_UART_BRIDGE_USE_KEEPALIVE
-    .keepalive_timeout = CONFIG_ESP_UART_BRIDGE_KEEPALIVE_TIMEOUT,
-#else
-    .keepalive_timeout = 0,
-#endif
-    .uart_num   = CONFIG_ESP_UART_BRIDGE_UART_NUM,
-#ifdef CONFIG_ESP_UART_BRIDGE_REMAP_PINS
-    .txd_pin    = CONFIG_ESP_UART_BRIDGE_TXD_PIN,
-    .rxd_pin    = CONFIG_ESP_UART_BRIDGE_RXD_PIN,
-#else
-    .txd_pin    = UART_PIN_NO_CHANGE,
-    .rxd_pin    = UART_PIN_NO_CHANGE,
-#endif
-    .baud_rate  = CONFIG_ESP_UART_BRIDGE_BAUD_RATE,
-    .data_bits  = UART_DATA_BITS,
-    .parity     = UART_PARITY,
-    .stop_bits  = UART_STOP_BITS,
-};
-
-void uart_bridge_task(void* arg)
+static void uart_bridge_task(void* arg)
 {
-    struct uart_bridge_config config =
-        (arg != NULL) ? *(struct uart_bridge_config*)arg :
-        default_uart_bridge_config;
+    struct uart_bridge_config config = *(struct uart_bridge_config*)arg;
     char buffer[BUFFER_SIZE];
     int ret;
 
@@ -300,3 +257,16 @@ void uart_bridge_task(void* arg)
     close(listen_fd);
     vTaskDelete(NULL);
 }
+
+BaseType_t uart_bridge_start(const struct uart_bridge_config *config,
+        const char *task_name, TaskHandle_t *handle)
+{
+    if(config == NULL)
+        return pdFAIL;
+
+    return xTaskCreate(uart_bridge_task,
+            task_name ? task_name : "uart_bridge_task",
+            UART_BRIDGE_TASK_STACK_SIZE, (void *) config,
+            UART_BRIDGE_TASK_PRIORITY, handle);
+}
+
