@@ -41,6 +41,8 @@ BaseType_t cmsis_dap_tcp_start(const struct cmsis_dap_tcp_config *config,
 // Task that runs the TCP server and processes requests and responses.
 void cmsis_dap_tcp_task(void* arg);
 
+void cmsis_dap_print_status(void);
+
 #ifdef __cplusplus
 }
 #endif

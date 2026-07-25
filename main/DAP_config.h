@@ -48,7 +48,8 @@
 #include <string.h>
 #include "DAP_gpio_config.h"
 
-// Board-specific defines come from the sdkconfig file.
+// Values come from cmsis_dap_gpio_config, the running task's per-instance
+// GPIO config (populated from sdkconfig by main.c at task-start time).
 #if defined(CONFIG_ESP_DAP_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_SWD_SUPPORTED)
 #define GPIO_SWCLK_TCK          (cmsis_dap_gpio_config->swclk_tck)
 #define GPIO_SWDIO_TMS          (cmsis_dap_gpio_config->swdio_tms)

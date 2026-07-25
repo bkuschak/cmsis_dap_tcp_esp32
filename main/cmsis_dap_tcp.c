@@ -33,6 +33,12 @@
 #define h_u32_to_le(a)  __bswap_32(a)
 #endif
 
+#ifdef CONFIG_LWIP_IPV6
+#define MAX_INET_ADDRSTRLEN     INET6_ADDRSTRLEN
+#else
+#define MAX_INET_ADDRSTRLEN     INET_ADDRSTRLEN
+#endif
+
 // DAP_PKT_SIZE must be >= to what is used by the client (OpenOCD).
 #define DAP_PKT_SIZE            CONFIG_ESP_DAP_TCP_MAX_PKT_SIZE
 #define DAP_PKT_HDR_SIGNATURE   0x00504144   // "DAP\0" in LE
@@ -70,12 +76,15 @@ struct msgbuf_t {
 // Keep TCP packet buffers in task-owned state instead of file-scope globals,
 // so multiple server tasks would not share request/response scratch space.
 // Also doubles as the per-task registry entry used for port/GPIO conflict
-// detection, and (eventually) for a "list active instances" status command.
+// detection, and for the "status" command below.
 struct cmsis_dap_tcp_state {
     const struct cmsis_dap_tcp_config *config;
     struct msgbuf_t buf;
     uint8_t response[DAP_PKT_SIZE];
     uint8_t packet_buf[DAP_TOTAL_PKT_SIZE];
+    char client_ip_str[MAX_INET_ADDRSTRLEN];
+    int client_port;
+    bool client_connected;
 };
 
 static struct cmsis_dap_tcp_state *task_states[CMSIS_DAP_TCP_MAX_TASKS];
@@ -285,6 +294,45 @@ static void release_resources(int slot)
     portEXIT_CRITICAL(&task_states_mux);
 }
 
+void cmsis_dap_print_status(void)
+{
+    struct {
+        bool active;
+        bool client_connected;
+        int port;
+        int client_port;
+        char client_ip_str[MAX_INET_ADDRSTRLEN];
+    } snapshot[CMSIS_DAP_TCP_MAX_TASKS] = {0};
+
+    // Snapshot under the lock, then print afterward -- printf() is too slow
+    // to call while holding a critical section.
+    portENTER_CRITICAL(&task_states_mux);
+    for (int i = 0; i < CMSIS_DAP_TCP_MAX_TASKS; i++) {
+        struct cmsis_dap_tcp_state *state = task_states[i];
+        if (state == NULL)
+            continue;
+        snapshot[i].active = true;
+        snapshot[i].client_connected = state->client_connected;
+        snapshot[i].port = state->config->port;
+        snapshot[i].client_port = state->client_port;
+        memcpy(snapshot[i].client_ip_str, state->client_ip_str,
+                sizeof(snapshot[i].client_ip_str));
+    }
+    portEXIT_CRITICAL(&task_states_mux);
+
+    for (int i = 0; i < CMSIS_DAP_TCP_MAX_TASKS; i++) {
+        if (!snapshot[i].active)
+            continue;
+        if (snapshot[i].client_connected) {
+            printf("cmsis_dap_tcp: listening on port %d, connected to "
+                    "client '%s:%d'.\n", snapshot[i].port,
+                    snapshot[i].client_ip_str, snapshot[i].client_port);
+        } else {
+            printf("cmsis_dap_tcp: listening on port %d.\n", snapshot[i].port);
+        }
+    }
+}
+
 BaseType_t cmsis_dap_tcp_start(const struct cmsis_dap_tcp_config *config,
         const char *task_name, TaskHandle_t *handle)
 {
@@ -323,7 +371,6 @@ void cmsis_dap_tcp_task(void *arg)
 
 #ifdef CONFIG_LWIP_IPV6
     // Dual stack to allow both IPv4 and IPv6 listeners.
-    char ipstr[INET6_ADDRSTRLEN];
     struct sockaddr_in6 addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin6_family = AF_INET6;
@@ -346,7 +393,6 @@ void cmsis_dap_tcp_task(void *arg)
     }
     LOG_DEBUG("Listening on IPv4/IPv6 socket.");
 #else
-    char ipstr[INET_ADDRSTRLEN];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -395,6 +441,8 @@ void cmsis_dap_tcp_task(void *arg)
     // Only one active client at a time is allowed.
     int client_fd = -1;
     int run __attribute__((unused)) = 0;
+    state->client_connected = false;
+    state->client_ip_str[0] = '\0';
 
     while (1) {
         struct sockaddr_storage client_addr;
@@ -434,28 +482,31 @@ void cmsis_dap_tcp_task(void *arg)
                     continue;   // restart select() loop
                 }
 
-                int client_port = 0;
-                ipstr[0] = '\0';
+                state->client_port = 0;
+                state->client_ip_str[0] = '\0';
                 if(client_addr.ss_family == AF_INET) {
                     // IPv4
                     struct sockaddr_in* s = (void*) &client_addr;
-                    inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof(ipstr));
-                    client_port = ntohs(s->sin_port);
+                    inet_ntop(AF_INET, &s->sin_addr, state->client_ip_str,
+                            sizeof(state->client_ip_str));
+                    state->client_port = ntohs(s->sin_port);
                 }
 #ifdef CONFIG_LWIP_IPV6
                 else {
                     // IPv6
                     struct sockaddr_in6* s = (void*) &client_addr;
-                    inet_ntop(AF_INET6, &s->sin6_addr, ipstr, sizeof(ipstr));
-                    client_port = ntohs(s->sin6_port);
+                    inet_ntop(AF_INET6, &s->sin6_addr, state->client_ip_str,
+                            sizeof(state->client_ip_str));
+                    state->client_port = ntohs(s->sin6_port);
                 }
 #endif
                 fprintf(stdout, "cmsis_dap_tcp: client connected %s:%d\n",
-                        ipstr, client_port);
+                        state->client_ip_str, state->client_port);
                 fcntl(new_fd, F_SETFL, O_NONBLOCK);
                 set_keepalives(new_fd, config);
                 client_fd = new_fd;
                 msgbuf_init(&state->buf);
+                state->client_connected = true;
                 continue;   // restart select() loop
             }
         }
@@ -467,6 +518,8 @@ void cmsis_dap_tcp_task(void *arg)
                     fprintf(stdout, "cmsis_dap_tcp: client disconnected.\n");
                     close(client_fd);
                     client_fd = -1;
+                    state->client_connected = false;
+                    state->client_ip_str[0] = '\0';
                     continue;   // restart select() loop
                 }
             }
@@ -491,6 +544,8 @@ void cmsis_dap_tcp_task(void *arg)
                     fprintf(stdout, "cmsis_dap_tcp: disconnecting.\n");
                     close(client_fd);
                     client_fd = -1;
+                    state->client_connected = false;
+                    state->client_ip_str[0] = '\0';
                     break;
                 }
             }
@@ -498,6 +553,8 @@ void cmsis_dap_tcp_task(void *arg)
     }
 
     fprintf(stdout, "cmsis_dap_tcp: shutting down.\n");
+    state->client_connected = false;
+
     if (client_fd >= 0) close(client_fd);
     close(listener_fd);
     release_resources(resources_slot);

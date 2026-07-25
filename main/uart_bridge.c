@@ -50,6 +50,7 @@
 
 #define UART_BRIDGE_TASK_STACK_SIZE     4096
 #define UART_BRIDGE_TASK_PRIORITY       5
+#define UART_BRIDGE_MAX_TASKS           4
 
 #ifndef MAX
 #define MAX(a,b) \
@@ -58,15 +59,120 @@
  _a > _b ? _a : _b; })
 #endif
 
+// Per-task state. A local (not heap-allocated) struct in uart_bridge_task()
+// is fine here -- unlike cmsis_dap_tcp_state, these buffers are small enough
+// for the task's own stack, and the struct only needs to live as long as
+// the task's function frame, which is its entire lifetime.
+struct uart_bridge_state {
+    const struct uart_bridge_config *config;
+    char buffer[BUFFER_SIZE];
+    char client_ip_str[INET_ADDRSTRLEN];
+    int client_port;
+    bool client_connected;
+};
+
+// Registry of running tasks, for conflict detection (port/UART already in
+// use) and for uart_bridge_print_status() to enumerate active instances.
+static struct uart_bridge_state *task_states[UART_BRIDGE_MAX_TASKS];
+static portMUX_TYPE task_states_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static int reserve_resources(struct uart_bridge_state *state)
+{
+    int slot = -1;
+
+    portENTER_CRITICAL(&task_states_mux);
+    for (int i = 0; i < UART_BRIDGE_MAX_TASKS; i++) {
+        if (task_states[i] == NULL) {
+            if (slot < 0)
+                slot = i;
+        } else if (task_states[i]->config->port == state->config->port ||
+                task_states[i]->config->uart_num == state->config->uart_num) {
+            portEXIT_CRITICAL(&task_states_mux);
+            return -1;
+        }
+    }
+    if (slot >= 0)
+        task_states[slot] = state;
+    portEXIT_CRITICAL(&task_states_mux);
+
+    return slot;
+}
+
+static void release_resources(int slot)
+{
+    if (slot < 0)
+        return;
+
+    portENTER_CRITICAL(&task_states_mux);
+    task_states[slot] = NULL;
+    portEXIT_CRITICAL(&task_states_mux);
+}
+
+void uart_bridge_print_status(void)
+{
+    struct {
+        bool active;
+        bool client_connected;
+        int port;
+        int uart_num;
+        int client_port;
+        char client_ip_str[INET_ADDRSTRLEN];
+    } snapshot[UART_BRIDGE_MAX_TASKS] = {0};
+
+    // Snapshot under the lock, then print afterward -- printf() is too slow
+    // to call while holding a critical section.
+    portENTER_CRITICAL(&task_states_mux);
+    for (int i = 0; i < UART_BRIDGE_MAX_TASKS; i++) {
+        struct uart_bridge_state *state = task_states[i];
+        if (state == NULL)
+            continue;
+        snapshot[i].active = true;
+        snapshot[i].client_connected = state->client_connected;
+        snapshot[i].port = state->config->port;
+        snapshot[i].uart_num = state->config->uart_num;
+        snapshot[i].client_port = state->client_port;
+        memcpy(snapshot[i].client_ip_str, state->client_ip_str,
+                sizeof(snapshot[i].client_ip_str));
+    }
+    portEXIT_CRITICAL(&task_states_mux);
+
+    bool any = false;
+    for (int i = 0; i < UART_BRIDGE_MAX_TASKS; i++) {
+        if (!snapshot[i].active)
+            continue;
+        any = true;
+        if (snapshot[i].client_connected) {
+            printf("UART bridge: listening on port %d for UART%d, connected "
+                    "to client '%s:%d'.\n", snapshot[i].port,
+                    snapshot[i].uart_num, snapshot[i].client_ip_str,
+                    snapshot[i].client_port);
+        } else {
+            printf("UART bridge: listening on port %d for UART%d.\n",
+                    snapshot[i].port, snapshot[i].uart_num);
+        }
+    }
+    if (!any)
+        printf("UART bridge: not running.\n");
+}
+
 static void uart_bridge_task(void* arg)
 {
     struct uart_bridge_config config = *(struct uart_bridge_config*)arg;
-    char buffer[BUFFER_SIZE];
+    struct uart_bridge_state state = {0};
+    state.config = &config;
     int ret;
+
+    int slot = reserve_resources(&state);
+    if (slot < 0) {
+        fprintf(stderr, "UART bridge: resource conflict on port or UART.\n");
+        vTaskDelete(NULL);
+        return;
+    }
 
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listen_fd < 0) {
         perror("UART bridge: Failed to create socket");
+        release_resources(slot);
         vTaskDelete(NULL);
         return;
     }
@@ -83,12 +189,14 @@ static void uart_bridge_task(void* arg)
     ret = bind(listen_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
     if(ret < 0) {
         perror("UART bridge: failed to bind socket");
+        release_resources(slot);
         vTaskDelete(NULL);
         return;
     }
     ret = listen(listen_fd, 1);
     if(ret < 0) {
         perror("UART bridge: failed to listen on socket");
+        release_resources(slot);
         vTaskDelete(NULL);
         return;
     }
@@ -98,6 +206,7 @@ static void uart_bridge_task(void* arg)
             UART_BUFFER_SIZE, UART_BUFFER_SIZE, 0, NULL, 0);
     if(ret != ESP_OK) {
         fprintf(stderr, "UART bridge: UART driver installation failed\n");
+        release_resources(slot);
         vTaskDelete(NULL);
         return;
     }
@@ -170,9 +279,11 @@ static void uart_bridge_task(void* arg)
                     // New client.
                     fcntl(new_fd, F_SETFL, O_NONBLOCK);
                     client_fd = new_fd;
+                    inet_ntop(AF_INET, &client_addr.sin_addr, state.client_ip_str,
+                            sizeof(state.client_ip_str));
+                    state.client_port = ntohs(client_addr.sin_port);
                     fprintf(stdout, "UART bridge: client connected %s:%d\n",
-                            inet_ntoa(client_addr.sin_addr),
-                            ntohs(client_addr.sin_port));
+                            state.client_ip_str, state.client_port);
 
                     if(config.keepalive_timeout > 0) {
                     // Use TCP keepalives to detect dead clients.
@@ -202,6 +313,8 @@ static void uart_bridge_task(void* arg)
                     int flags = fcntl(uart_fd, F_GETFL, 0);
                     fcntl(uart_fd, F_SETFL, flags | O_NONBLOCK);
 
+                    state.client_connected = true;
+
                     // Restart select() loop.
                     continue;
                 }
@@ -215,7 +328,7 @@ static void uart_bridge_task(void* arg)
 
         // Handle client socket.
         if(client_fd > 0 && FD_ISSET(client_fd, &read_fds)) {
-            ret = recv(client_fd, buffer, sizeof(buffer)-1, 0);
+            ret = recv(client_fd, state.buffer, sizeof(state.buffer)-1, 0);
             if(ret == 0 ||
               (ret < 0 && (errno == ECONNABORTED || errno == ENOTCONN))) {
                 // Client has disconnected.
@@ -224,6 +337,7 @@ static void uart_bridge_task(void* arg)
                 close(uart_fd);
                 client_fd = -1;
                 uart_fd = -1;
+                state.client_connected = false;
                 continue;       // restart select() loop
             }
             else if(ret < 0) {
@@ -231,30 +345,32 @@ static void uart_bridge_task(void* arg)
                     perror("UART bridge: socket read error");
             }
             else {
-                write(uart_fd, buffer, ret);
+                write(uart_fd, state.buffer, ret);
             }
         }
 
         // Handle UART.
         if(uart_fd > 0 && FD_ISSET(uart_fd, &read_fds)) {
-            ret = read(uart_fd, buffer, sizeof(buffer)-1);
+            ret = read(uart_fd, state.buffer, sizeof(state.buffer)-1);
             if(ret <= 0) {
                 if(errno != EAGAIN && errno != EWOULDBLOCK)
                     perror("UART bridge: UART read error");
             }
             else {
-                send(client_fd, buffer, ret, 0);
+                send(client_fd, state.buffer, ret, 0);
             }
         }
     }
 
     fprintf(stdout, "UART bridge: shutting down.\n");
+    state.client_connected = false;
 
     if(client_fd >= 0)
         close(client_fd);
     if(uart_fd >= 0)
         close(uart_fd);
     close(listen_fd);
+    release_resources(slot);
     vTaskDelete(NULL);
 }
 

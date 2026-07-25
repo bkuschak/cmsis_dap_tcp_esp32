@@ -23,6 +23,8 @@ struct uart_bridge_config {
 BaseType_t uart_bridge_start(const struct uart_bridge_config *config,
         const char *task_name, TaskHandle_t *handle);
 
+void uart_bridge_print_status(void);
+
 #ifdef __cplusplus
 }
 #endif
