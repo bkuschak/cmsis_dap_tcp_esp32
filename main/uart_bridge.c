@@ -69,6 +69,8 @@ struct uart_bridge_state {
     char client_ip_str[INET_ADDRSTRLEN];
     int client_port;
     bool client_connected;
+    unsigned long count_rx;
+    unsigned long count_tx;
 };
 
 // Registry of running tasks, for conflict detection (port/UART already in
@@ -117,6 +119,8 @@ void uart_bridge_print_status(void)
         int uart_num;
         int client_port;
         char client_ip_str[INET_ADDRSTRLEN];
+        unsigned long count_rx;
+        unsigned long count_tx;
     } snapshot[UART_BRIDGE_MAX_TASKS] = {0};
 
     // Snapshot under the lock, then print afterward -- printf() is too slow
@@ -131,6 +135,8 @@ void uart_bridge_print_status(void)
         snapshot[i].port = state->config->port;
         snapshot[i].uart_num = state->config->uart_num;
         snapshot[i].client_port = state->client_port;
+        snapshot[i].count_rx = state->count_rx;
+        snapshot[i].count_tx = state->count_tx;
         memcpy(snapshot[i].client_ip_str, state->client_ip_str,
                 sizeof(snapshot[i].client_ip_str));
     }
@@ -142,13 +148,14 @@ void uart_bridge_print_status(void)
             continue;
         any = true;
         if (snapshot[i].client_connected) {
-            printf("UART bridge: listening on port %d for UART%d, connected "
-                    "to client '%s:%d'.\n", snapshot[i].port,
-                    snapshot[i].uart_num, snapshot[i].client_ip_str,
-                    snapshot[i].client_port);
+            printf("UART%d bridge: listening on port %d, connected "
+                    "to client '%s:%d'. TX: %lu bytes, RX: %lu bytes.\n",
+                    snapshot[i].uart_num, snapshot[i].port,
+                    snapshot[i].client_ip_str, snapshot[i].client_port,
+                    snapshot[i].count_tx, snapshot[i].count_rx);
         } else {
-            printf("UART bridge: listening on port %d for UART%d.\n",
-                    snapshot[i].port, snapshot[i].uart_num);
+            printf("UART%d bridge: listening on port %d.\n",
+                    snapshot[i].uart_num, snapshot[i].port);
         }
     }
     if (!any)
@@ -225,8 +232,18 @@ static void uart_bridge_task(void* arg)
 
     if(config.txd_pin != UART_PIN_NO_CHANGE ||
        config.rxd_pin != UART_PIN_NO_CHANGE) {
-        fprintf(stderr, "UART bridge: remapping UART_TX = GPIO_NUM_%d, "
-                "UART_RX = GPIO_NUM_%d.\n", config.txd_pin, config.rxd_pin);
+        fprintf(stderr, "UART bridge: remapping UART%d TX = GPIO_NUM_%d, "
+                "RX = GPIO_NUM_%d.\n", config.uart_num, config.txd_pin,
+                config.rxd_pin);
+
+        // Disable any GPIO output drive on these pins before handing them
+        // to the UART peripheral.
+        if (config.rxd_pin != UART_PIN_NO_CHANGE)
+            ESP_ERROR_CHECK(gpio_set_direction(config.rxd_pin,
+                        GPIO_MODE_INPUT));
+        if (config.txd_pin != UART_PIN_NO_CHANGE)
+            ESP_ERROR_CHECK(gpio_set_direction(config.txd_pin,
+                        GPIO_MODE_INPUT));
         ESP_ERROR_CHECK(uart_set_pin(config.uart_num,
                     config.txd_pin, config.rxd_pin,
                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
@@ -236,8 +253,8 @@ static void uart_bridge_task(void* arg)
     char uart_addr[32];
     snprintf(uart_addr, sizeof(uart_addr), "/dev/uart/%d", config.uart_num);
 
-    fprintf(stdout, "UART bridge: listening on port %d for UART%d.\n",
-            config.port, config.uart_num);
+    fprintf(stdout, "UART%d bridge: listening on port %d.\n",
+            config.uart_num, config.port);
 
     // Select() loop blocks until activity on sockets or UART.
     struct sockaddr_in client_addr;
@@ -313,6 +330,8 @@ static void uart_bridge_task(void* arg)
                     int flags = fcntl(uart_fd, F_GETFL, 0);
                     fcntl(uart_fd, F_SETFL, flags | O_NONBLOCK);
 
+                    state.count_rx = 0;
+                    state.count_tx = 0;
                     state.client_connected = true;
 
                     // Restart select() loop.
@@ -337,6 +356,8 @@ static void uart_bridge_task(void* arg)
                 close(uart_fd);
                 client_fd = -1;
                 uart_fd = -1;
+                state.count_rx = 0;
+                state.count_tx = 0;
                 state.client_connected = false;
                 continue;       // restart select() loop
             }
@@ -346,6 +367,7 @@ static void uart_bridge_task(void* arg)
             }
             else {
                 write(uart_fd, state.buffer, ret);
+                state.count_tx += ret;
             }
         }
 
@@ -357,6 +379,7 @@ static void uart_bridge_task(void* arg)
                     perror("UART bridge: UART read error");
             }
             else {
+                state.count_rx += ret;
                 send(client_fd, state.buffer, ret, 0);
             }
         }
@@ -364,6 +387,8 @@ static void uart_bridge_task(void* arg)
 
     fprintf(stdout, "UART bridge: shutting down.\n");
     state.client_connected = false;
+    state.count_rx = 0;
+    state.count_tx = 0;
 
     if(client_fd >= 0)
         close(client_fd);
