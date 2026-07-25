@@ -178,6 +178,8 @@ static wifi_auth_mode_t parse_auth_mode(const char* auth_str)
         return WIFI_AUTH_WPA2_PSK;
     } else if (strcmp(auth_str, "wpa3") == 0) {
         return WIFI_AUTH_WPA3_PSK;
+    } else if (strcmp(auth_str, "open") == 0) {
+        return WIFI_AUTH_OPEN;
     } else {
         return WIFI_AUTH_WPA2_PSK; // Default
     }
@@ -267,7 +269,7 @@ static int wifi_cmd_handler(int argc, char **argv)
     if (nerrors != 0) {
         arg_print_errors(stderr, wifi_args.end, argv[0]);
         printf("Usage: wifi \"<ssid>\" \"<password>\" [auth_mode]\n");
-        printf("  auth_mode: wep, wpa, wpa2, wpa3 (default: wpa2)\n");
+        printf("  auth_mode: open, wep, wpa, wpa2, wpa3 (default: wpa2)\n");
         return 1;
     }
 
@@ -469,8 +471,8 @@ static void commands_init(void)
     wifi_args.password =
         arg_str1(NULL, NULL, "<password>", "WiFi network password");
     wifi_args.auth_mode =
-        arg_str0(NULL, NULL, "[auth_mode]", "Authentication mode: wep, wpa, "
-                "wpa2, wpa3");
+        arg_str0(NULL, NULL, "[auth_mode]", "Authentication mode: open, wep, "
+                "wpa, wpa2, wpa3");
     wifi_args.end = arg_end(3);
 
     const esp_console_cmd_t wifi_cmd = {
@@ -605,6 +607,10 @@ int wifi_init(void)
             sizeof(wifi_config.sta.ssid));
     strlcpy((char*)wifi_config.sta.password, wifi_password,
             sizeof(wifi_config.sta.password));
+    if(wifi_auth_mode == WIFI_AUTH_OPEN) {
+        wifi_config.sta.pmf_cfg.capable = true;
+        wifi_config.sta.pmf_cfg.required = false;
+    }
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
     ESP_ERROR_CHECK(esp_wifi_start());
