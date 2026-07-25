@@ -144,6 +144,8 @@ void uart_bridge_task(void* arg)
         vTaskDelete(NULL);
         return;
     }
+    uart_vfs_dev_register();
+
     uart_config_t uart_config = {
         .baud_rate  = config.baud_rate,
         .data_bits  = config.data_bits,
@@ -163,6 +165,7 @@ void uart_bridge_task(void* arg)
                     config.txd_pin, config.rxd_pin,
                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     }
+    uart_vfs_dev_use_driver(config.uart_num);
 
     char uart_addr[32];
     snprintf(uart_addr, sizeof(uart_addr), "/dev/uart/%d", config.uart_num);
@@ -238,7 +241,6 @@ void uart_bridge_task(void* arg)
                         close(client_fd);
                         client_fd = -1;
                     }
-                    uart_vfs_dev_use_driver(config.uart_num);
 
                     int flags = fcntl(uart_fd, F_GETFL, 0);
                     fcntl(uart_fd, F_SETFL, flags | O_NONBLOCK);
