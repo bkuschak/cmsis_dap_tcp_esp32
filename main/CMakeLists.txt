@@ -14,6 +14,8 @@ if(CMAKE_PROJECT_NAME STREQUAL "cmsis_dap_tcp_esp32")
     list(APPEND COMPONENT_SRCS "main.c")
 endif()
 
+set(PRIV_REQUIRES "spi_flash" "esp_driver_gpio")
+
 if(CONFIG_ESP_UART_BRIDGE_ENABLED)
     list(APPEND COMPONENT_SRCS "uart_bridge.c")
 endif()
@@ -22,9 +24,13 @@ if(CONFIG_ESP_PRINT_CPU_USAGE)
     list(APPEND COMPONENT_SRCS "cpu_usage.c")
 endif()
 
+if(CONFIG_ESP_DAP_LED_RGB)
+    list(APPEND COMPONENT_SRCS "ws2812_led.c")
+    list(APPEND PRIV_REQUIRES "esp_driver_rmt" "espressif__led_strip")
+endif()
+
 idf_component_register(SRCS ${COMPONENT_SRCS}
-                       PRIV_REQUIRES spi_flash
-                       PRIV_REQUIRES esp_driver_gpio
+                       PRIV_REQUIRES ${PRIV_REQUIRES}
                        REQUIRES lwip
                        REQUIRES esp_driver_uart
                        REQUIRES esp_event
