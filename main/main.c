@@ -696,6 +696,7 @@ static BaseType_t cmsis_dap_tcp_task_start(void)
     return ret;
 }
 
+#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
 static BaseType_t uart_bridge_task_start(void)
 {
     // Configure one UART bridge task.
@@ -744,6 +745,7 @@ static BaseType_t uart_bridge_task_start(void)
 
     return uart_bridge_start(&config, "uart_bridge_task", NULL);
 }
+#endif
 
 void app_main(void)
 {
