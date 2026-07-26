@@ -58,7 +58,7 @@ The software has some limitations:
 
 This code requires the ESP-IDF build tools. Refer to the official
 [installation guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation)
-and install them first. This code was tested against ESP-IDF v6.0.
+and install them first. This project was tested using ESP-IDF v6.0.2.
 
 Activate your ESP-IDF virtual environment:
 
@@ -66,17 +66,38 @@ Activate your ESP-IDF virtual environment:
 . $HOME/esp/esp-idf/export.sh
 ```
 
-The code supports multiple different boards, and each one has its own
-```sdkconfig``` file.
-
-Choose the correct ```sdkconfig.<board_name>``` file for your board and copy it
-to ```sdkconfig```. Then configure, build and flash the firmware. For example,
-for the Xiao ESP32-C6 board:
+The code supports different boards as 'presets'. They are described by the
+CMakePresets.json file. Multiple board builds can coexist without interference
+as each one uses its own build directory. To see the list of supported boards:
 
 ```
-cp sdkconfig.xiao_esp32c6 sdkconfig
-idf.py fullclean menuconfig
-idf.py build flash
+cmake --list-presets
+
+Available configure presets:
+
+  "board_esp32s3_devkit_c1" - Espressif ESP32-S3 Devkit C1 board
+  "board_yd_esp32_s3"       - VCC-GND Studio YD-ESP32-S3 (Devkit C1 clone)
+  "board_esp32s3_zero"      - Waveshare ESP32-S3-Zero board
+  "board_xiao_esp32c6"      - Xiao ESP32-C6 board
+  "board_xiao_esp32c6_alt"  - Xiao ESP32-C6 board (alternate pins for UART bridge)
+```
+
+If you are using one of the supported boards, type <b>one</b> of the following
+lines, and all subsequent ```idf.py``` commands will target that specific
+build.
+
+```
+export IDF_PRESET=board_esp32s3_devkit_c1
+export IDF_PRESET=board_yd_esp32_s3
+export IDF_PRESET=board_esp32s3_zero
+export IDF_PRESET=board_xiao_esp32c6
+export IDF_PRESET=board_xiao_esp32c6_alt
+```
+
+Then proceed with the build and installation:
+
+```
+idf.py fullclean menuconfig build flash
 ```
 
 In menuconfig, goto to the "CMSIS-DAP configuration" page.

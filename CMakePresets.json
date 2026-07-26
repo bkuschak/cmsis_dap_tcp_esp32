@@ -1,0 +1,61 @@
+{
+  "version": 4,
+  "configurePresets": [
+    {
+      "name": "board_esp32s3_devkit_c1",
+      "displayName": "Espressif ESP32-S3 Devkit C1 board",
+      "description": "Builds for the ESP32S3 Devkit C1 board",
+      "binaryDir": "build/build_esp32s3_devkit_c1",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32s3",
+        "SDKCONFIG": "build/build_esp32s3_devkit_c1/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.board_esp32s3_devkit_c1"
+      }
+    },
+    {
+      "name": "board_yd_esp32_s3",
+      "displayName": "VCC-GND Studio YD-ESP32-S3 (Devkit C1 clone)",
+      "description": "Builds for the VCC-GND Studio YD-ESP32-S3 board",
+      "binaryDir": "build/build_yd_esp32_s3",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32s3",
+        "SDKCONFIG": "build/build_yd_esp32_s3/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.board_yd_esp32_s3"
+      }
+    },
+    {
+      "name": "board_esp32s3_zero",
+      "displayName": "Waveshare ESP32-S3-Zero board",
+      "description": "Builds for the ESP32-S3-Zero board",
+      "binaryDir": "build/build_esp32s3_zero",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32s3",
+        "SDKCONFIG": "build/build_esp32s3_zero/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.board_esp32s3_zero"
+      }
+    },
+    {
+      "name": "board_xiao_esp32c6",
+      "displayName": "Seeed Studio Xiao ESP32-C6 board",
+      "description": "Builds for the Xiao ESP32-C6 board",
+      "binaryDir": "build/build_xiao_esp32c6",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c6",
+        "SDKCONFIG": "build/build_xiao_esp32c6/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.board_xiao_esp32c6"
+      }
+    },
+    {
+      "name": "board_xiao_esp32c6_alt",
+      "displayName": "Seeed Studio Xiao ESP32-C6 board (alternate pins for UART bridge)",
+      "description": "Builds for the Xiao ESP32-C6 board (alternate)",
+      "binaryDir": "build/build_xiao_esp32c6_alt",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c6",
+        "SDKCONFIG": "build/build_xiao_esp32c6_alt/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.board_xiao_esp32c6_alt"
+      }
+    }
+  ]
+}
+
