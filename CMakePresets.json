@@ -35,6 +35,17 @@
       }
     },
     {
+      "name": "board_esp32c3_super_mini",
+      "displayName": "ESP32-C3 SuperMini board",
+      "description": "Builds for the ESP32-C3 SuperMini board",
+      "binaryDir": "build/build_esp32c3_super_mini",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c3",
+        "SDKCONFIG": "build/build_esp32c3_super_mini/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.board_esp32c3_super_mini"
+      }
+    },
+    {
       "name": "board_xiao_esp32c6",
       "displayName": "Seeed Studio Xiao ESP32-C6 board",
       "description": "Builds for the Xiao ESP32-C6 board",
