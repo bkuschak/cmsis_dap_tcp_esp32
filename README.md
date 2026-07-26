@@ -206,7 +206,7 @@ Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -75 dBm
 IP address: 192.168.1.107
 Disabling WiFi power savings to improve performance.
 cmsis_dap_tcp: listening on port 4441.
-UART bridge: remapping UART_TX = GPIO_NUM_16, UART_RX = GPIO_NUM_15.
+UART bridge: remapping UART1 TX = GPIO_NUM_16, RX = GPIO_NUM_15.
 UART bridge: listening on port 4442 for UART1.
 IPv6 address (link-local): fe80:0000:0000:0000:9aa3:16ff:feec:6640
 IPv6 address (global): 2406:3400:031f:ba10:9aa3:16ff:feec:6640

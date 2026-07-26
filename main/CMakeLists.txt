@@ -32,6 +32,9 @@ endif()
 idf_component_register(SRCS ${COMPONENT_SRCS}
                        PRIV_REQUIRES ${PRIV_REQUIRES}
                        REQUIRES lwip
+                       # Public (not PRIV_REQUIRES): uart_bridge.h exposes
+                       # driver/uart.h's enum types in its public config
+                       # struct, so dependents need this propagated too.
                        REQUIRES esp_driver_uart
                        REQUIRES esp_event
                        REQUIRES esp_timer
