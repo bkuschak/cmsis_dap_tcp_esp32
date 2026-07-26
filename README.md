@@ -75,11 +75,12 @@ cmake --list-presets
 
 Available configure presets:
 
-  "board_esp32s3_devkit_c1" - Espressif ESP32-S3 Devkit C1 board
-  "board_yd_esp32_s3"       - VCC-GND Studio YD-ESP32-S3 (Devkit C1 clone)
-  "board_esp32s3_zero"      - Waveshare ESP32-S3-Zero board
-  "board_xiao_esp32c6"      - Xiao ESP32-C6 board
-  "board_xiao_esp32c6_alt"  - Xiao ESP32-C6 board (alternate pins for UART bridge)
+  "board_esp32s3_devkit_c1"  - Espressif ESP32-S3 Devkit C1 board
+  "board_yd_esp32_s3"        - VCC-GND Studio YD-ESP32-S3 (Devkit C1 clone)
+  "board_esp32s3_zero"       - Waveshare ESP32-S3-Zero board
+  "board_esp32c3_super_mini" - ESP32-C3 SuperMini board
+  "board_xiao_esp32c6"       - Seeed Studio Xiao ESP32-C6 board
+  "board_xiao_esp32c6_alt"   - Seeed Studio Xiao ESP32-C6 board (alternate pins for UART bridge)
 ```
 
 If you are using one of the supported boards, type <b>one</b> of the following
@@ -90,6 +91,7 @@ build.
 export IDF_PRESET=board_esp32s3_devkit_c1
 export IDF_PRESET=board_yd_esp32_s3
 export IDF_PRESET=board_esp32s3_zero
+export IDF_PRESET=board_esp32c3_super_mini
 export IDF_PRESET=board_xiao_esp32c6
 export IDF_PRESET=board_xiao_esp32c6_alt
 ```
