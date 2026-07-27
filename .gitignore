@@ -1,3 +1,6 @@
 wifi_password.h
 build*/
 **/sdkconfig
+managed_components/
+dependencies.lock
+.cache/
