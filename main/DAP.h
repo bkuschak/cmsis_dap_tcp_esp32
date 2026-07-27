@@ -29,6 +29,7 @@
 #define __DAP_H__
 
 #include "device_config.h"
+#include "DAP_config.h"  // defines DAP_SWD/DAP_JTAG, used below
 
 // DAP Firmware Version
 #ifdef  DAP_FW_V1
@@ -264,8 +265,8 @@ typedef struct {
 #endif
 } DAP_Data_t;
 
-extern          __thread DAP_Data_t DAP_Data;            // DAP Data
-extern volatile __thread uint8_t    DAP_TransferAbort;   // Transfer Abort Flag
+extern          __thread DAP_Data_t *DAP_Data;            // DAP Data
+extern volatile __thread uint8_t     DAP_TransferAbort;   // Transfer Abort Flag
 
 
 #ifdef  __cplusplus

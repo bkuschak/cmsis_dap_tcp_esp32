@@ -64,7 +64,7 @@
   PIN_TCK_SET();                        \
   PIN_DELAY()
 
-#define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data.clock_delay)
+#define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data->clock_delay)
 
 
 #if (DAP_JTAG != 0)
@@ -124,14 +124,14 @@ static void JTAG_IR_##speed (uint32_t ir) {                                     
   JTAG_CYCLE_TCK();                         /* Shift-IR */                      \
                                                                                 \
   PIN_TDI_OUT(1U);                                                              \
-  for (n = DAP_Data.jtag_dev.ir_before[DAP_Data.jtag_dev.index]; n; n--) {      \
+  for (n = DAP_Data->jtag_dev.ir_before[DAP_Data->jtag_dev.index]; n; n--) {      \
     JTAG_CYCLE_TCK();                       /* Bypass before data */            \
   }                                                                             \
-  for (n = DAP_Data.jtag_dev.ir_length[DAP_Data.jtag_dev.index] - 1U; n; n--) { \
+  for (n = DAP_Data->jtag_dev.ir_length[DAP_Data->jtag_dev.index] - 1U; n; n--) { \
     JTAG_CYCLE_TDI(ir);                     /* Set IR bits (except last) */     \
     ir >>= 1;                                                                   \
   }                                                                             \
-  n = DAP_Data.jtag_dev.ir_after[DAP_Data.jtag_dev.index];                      \
+  n = DAP_Data->jtag_dev.ir_after[DAP_Data->jtag_dev.index];                      \
   if (n) {                                                                      \
     JTAG_CYCLE_TDI(ir);                     /* Set last IR bit */               \
     PIN_TDI_OUT(1U);                                                            \
@@ -169,7 +169,7 @@ static uint8_t JTAG_Transfer##speed (uint32_t request, uint32_t *data) {        
   JTAG_CYCLE_TCK();                         /* Capture-DR */                    \
   JTAG_CYCLE_TCK();                         /* Shift-DR */                      \
                                                                                 \
-  for (n = DAP_Data.jtag_dev.index; n; n--) {                                   \
+  for (n = DAP_Data->jtag_dev.index; n; n--) {                                   \
     JTAG_CYCLE_TCK();                       /* Bypass before data */            \
   }                                                                             \
                                                                                 \
@@ -195,7 +195,7 @@ static uint8_t JTAG_Transfer##speed (uint32_t request, uint32_t *data) {        
       val  |= bit << 31;                                                        \
       val >>= 1;                                                                \
     }                                                                           \
-    n = DAP_Data.jtag_dev.count - DAP_Data.jtag_dev.index - 1U;                 \
+    n = DAP_Data->jtag_dev.count - DAP_Data->jtag_dev.index - 1U;                 \
     if (n) {                                                                    \
       JTAG_CYCLE_TDO(bit);                  /* Get D31 */                       \
       for (--n; n; n--) {                                                       \
@@ -216,7 +216,7 @@ static uint8_t JTAG_Transfer##speed (uint32_t request, uint32_t *data) {        
       JTAG_CYCLE_TDI(val);                  /* Set D0..D30 */                   \
       val >>= 1;                                                                \
     }                                                                           \
-    n = DAP_Data.jtag_dev.count - DAP_Data.jtag_dev.index - 1U;                 \
+    n = DAP_Data->jtag_dev.count - DAP_Data->jtag_dev.index - 1U;                 \
     if (n) {                                                                    \
       JTAG_CYCLE_TDI(val);                  /* Set D31 */                       \
       for (--n; n; n--) {                                                       \
@@ -238,11 +238,11 @@ exit:                                                                           
                                                                                 \
   /* Capture Timestamp */                                                       \
   if (request & DAP_TRANSFER_TIMESTAMP) {                                       \
-    DAP_Data.timestamp = TIMESTAMP_GET();                                       \
+    DAP_Data->timestamp = TIMESTAMP_GET();                                       \
   }                                                                             \
                                                                                 \
   /* Idle cycles */                                                             \
-  n = DAP_Data.transfer.idle_cycles;                                            \
+  n = DAP_Data->transfer.idle_cycles;                                            \
   while (n--) {                                                                 \
     JTAG_CYCLE_TCK();                       /* Idle */                          \
   }                                                                             \
@@ -257,7 +257,7 @@ JTAG_IR_Function(Fast)
 JTAG_TransferFunction(Fast)
 
 #undef  PIN_DELAY
-#define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data.clock_delay)
+#define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data->clock_delay)
 JTAG_IR_Function(Slow)
 JTAG_TransferFunction(Slow)
 
@@ -275,7 +275,7 @@ uint32_t JTAG_ReadIDCode (void) {
   JTAG_CYCLE_TCK();                         /* Capture-DR */
   JTAG_CYCLE_TCK();                         /* Shift-DR */
 
-  for (n = DAP_Data.jtag_dev.index; n; n--) {
+  for (n = DAP_Data->jtag_dev.index; n; n--) {
     JTAG_CYCLE_TCK();                       /* Bypass before data */
   }
 
@@ -309,7 +309,7 @@ void JTAG_WriteAbort (uint32_t data) {
   JTAG_CYCLE_TCK();                         /* Capture-DR */
   JTAG_CYCLE_TCK();                         /* Shift-DR */
 
-  for (n = DAP_Data.jtag_dev.index; n; n--) {
+  for (n = DAP_Data->jtag_dev.index; n; n--) {
     JTAG_CYCLE_TCK();                       /* Bypass before data */
   }
 
@@ -322,7 +322,7 @@ void JTAG_WriteAbort (uint32_t data) {
     JTAG_CYCLE_TDI(data);                   /* Set D0..D30 */
     data >>= 1;
   }
-  n = DAP_Data.jtag_dev.count - DAP_Data.jtag_dev.index - 1U;
+  n = DAP_Data->jtag_dev.count - DAP_Data->jtag_dev.index - 1U;
   if (n) {
     JTAG_CYCLE_TDI(data);                   /* Set D31 */
     for (--n; n; n--) {
@@ -346,7 +346,7 @@ void JTAG_WriteAbort (uint32_t data) {
 //   ir:     IR value
 //   return: none
 void JTAG_IR (uint32_t ir) {
-  if (DAP_Data.fast_clock) {
+  if (DAP_Data->fast_clock) {
     JTAG_IR_Fast(ir);
   } else {
     JTAG_IR_Slow(ir);
@@ -359,7 +359,7 @@ void JTAG_IR (uint32_t ir) {
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
 uint8_t  JTAG_Transfer(uint32_t request, uint32_t *data) {
-  if (DAP_Data.fast_clock) {
+  if (DAP_Data->fast_clock) {
     return JTAG_TransferFast(request, data);
   } else {
     return JTAG_TransferSlow(request, data);

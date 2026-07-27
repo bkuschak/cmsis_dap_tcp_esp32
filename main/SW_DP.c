@@ -54,7 +54,7 @@
   PIN_SWCLK_SET();                      \
   PIN_DELAY()
 
-#define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data.clock_delay)
+#define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data->clock_delay)
 
 
 // Generate SWJ Sequence
@@ -163,7 +163,7 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
                                                                                 \
   /* Turnaround */                                                              \
   PIN_SWDIO_OUT_DISABLE();                                                      \
-  for (n = DAP_Data.swd_conf.turnaround; n; n--) {                              \
+  for (n = DAP_Data->swd_conf.turnaround; n; n--) {                              \
     SW_CLOCK_CYCLE();                                                           \
   }                                                                             \
                                                                                 \
@@ -193,13 +193,13 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
       }                                                                         \
       if (data) { *data = val; }                                                \
       /* Turnaround */                                                          \
-      for (n = DAP_Data.swd_conf.turnaround; n; n--) {                          \
+      for (n = DAP_Data->swd_conf.turnaround; n; n--) {                          \
         SW_CLOCK_CYCLE();                                                       \
       }                                                                         \
       PIN_SWDIO_OUT_ENABLE();                                                   \
     } else {                                                                    \
       /* Turnaround */                                                          \
-      for (n = DAP_Data.swd_conf.turnaround; n; n--) {                          \
+      for (n = DAP_Data->swd_conf.turnaround; n; n--) {                          \
         SW_CLOCK_CYCLE();                                                       \
       }                                                                         \
       PIN_SWDIO_OUT_ENABLE();                                                   \
@@ -215,10 +215,10 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
     }                                                                           \
     /* Capture Timestamp */                                                     \
     if (request & DAP_TRANSFER_TIMESTAMP) {                                     \
-      DAP_Data.timestamp = TIMESTAMP_GET();                                     \
+      DAP_Data->timestamp = TIMESTAMP_GET();                                     \
     }                                                                           \
     /* Idle cycles */                                                           \
-    n = DAP_Data.transfer.idle_cycles;                                          \
+    n = DAP_Data->transfer.idle_cycles;                                          \
     if (n) {                                                                    \
       PIN_SWDIO_OUT(0U);                                                        \
       for (; n; n--) {                                                          \
@@ -231,17 +231,17 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
                                                                                 \
   if ((ack == DAP_TRANSFER_WAIT) || (ack == DAP_TRANSFER_FAULT)) {              \
     /* WAIT or FAULT response */                                                \
-    if (DAP_Data.swd_conf.data_phase && ((request & DAP_TRANSFER_RnW) != 0U)) { \
+    if (DAP_Data->swd_conf.data_phase && ((request & DAP_TRANSFER_RnW) != 0U)) { \
       for (n = 32U+1U; n; n--) {                                                \
         SW_CLOCK_CYCLE();               /* Dummy Read RDATA[0:31] + Parity */   \
       }                                                                         \
     }                                                                           \
     /* Turnaround */                                                            \
-    for (n = DAP_Data.swd_conf.turnaround; n; n--) {                            \
+    for (n = DAP_Data->swd_conf.turnaround; n; n--) {                            \
       SW_CLOCK_CYCLE();                                                         \
     }                                                                           \
     PIN_SWDIO_OUT_ENABLE();                                                     \
-    if (DAP_Data.swd_conf.data_phase && ((request & DAP_TRANSFER_RnW) == 0U)) { \
+    if (DAP_Data->swd_conf.data_phase && ((request & DAP_TRANSFER_RnW) == 0U)) { \
       PIN_SWDIO_OUT(0U);                                                        \
       for (n = 32U+1U; n; n--) {                                                \
         SW_CLOCK_CYCLE();               /* Dummy Write WDATA[0:31] + Parity */  \
@@ -252,7 +252,7 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
   }                                                                             \
                                                                                 \
   /* Protocol error */                                                          \
-  for (n = DAP_Data.swd_conf.turnaround + 32U + 1U; n; n--) {                   \
+  for (n = DAP_Data->swd_conf.turnaround + 32U + 1U; n; n--) {                   \
     SW_CLOCK_CYCLE();                   /* Back off data phase */               \
   }                                                                             \
   PIN_SWDIO_OUT_ENABLE();                                                       \
@@ -266,7 +266,7 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
 SWD_TransferFunction(Fast)
 
 #undef  PIN_DELAY
-#define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data.clock_delay)
+#define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data->clock_delay)
 SWD_TransferFunction(Slow)
 
 
@@ -275,7 +275,7 @@ SWD_TransferFunction(Slow)
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
 uint8_t  SWD_Transfer(uint32_t request, uint32_t *data) {
-  if (DAP_Data.fast_clock) {
+  if (DAP_Data->fast_clock) {
     return SWD_TransferFast(request, data);
   } else {
     return SWD_TransferSlow(request, data);

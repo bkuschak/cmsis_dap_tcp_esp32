@@ -17,6 +17,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 
+#include "DAP_config.h"
 #include "DAP.h"
 #include "cmsis_dap_tcp.h"
 
@@ -79,6 +80,7 @@ struct msgbuf_t {
 // detection, and for the "status" command below.
 struct cmsis_dap_tcp_state {
     const struct cmsis_dap_tcp_config *config;
+    DAP_Data_t dap_data;
     struct msgbuf_t buf;
     uint8_t response[DAP_PKT_SIZE];
     uint8_t packet_buf[DAP_TOTAL_PKT_SIZE];
@@ -367,6 +369,7 @@ void cmsis_dap_tcp_task(void *arg)
     }
 
     cmsis_dap_gpio_config = &config->gpio;
+    DAP_Data = &state->dap_data;
     DAP_Setup();
 
 #ifdef CONFIG_LWIP_IPV6
