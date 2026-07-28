@@ -42,3 +42,14 @@ idf_component_register(SRCS ${COMPONENT_SRCS}
                        REQUIRES nvs_flash
                        REQUIRES console
                        INCLUDE_DIRS ".")
+
+# Allow git hash to be embedded in the DAP_ID_PRODUCT_FW_VER string.
+include("${COMPONENT_DIR}/git_version.cmake")
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    -DGIT_HASH="${GIT_HASH}"
+    -DGIT_DATE="${GIT_DATE}"
+    -DGIT_STATUS="${GIT_STATUS}"
+)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/.git/index")
+

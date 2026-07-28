@@ -344,8 +344,18 @@ __STATIC_INLINE uint8_t DAP_GetTargetBoardNameString (char *str)
 */
 __STATIC_INLINE uint8_t DAP_GetProductFirmwareVersionString (char *str)
 {
+#if defined(GIT_DATE) && defined(GIT_HASH) && defined(GIT_STATUS)
+    // GIT_DATE, GIT_HASH, and GIT_STATUS are set by CMakeLists.txt
+    snprintf(str, 60, "%s %s%s%s",
+            GIT_DATE,
+            GIT_HASH,
+            (strlen(GIT_STATUS) > 0) ? "-" : "",
+            GIT_STATUS);
+    return strlen(str) + 1;
+#else
     (void)str;
     return (0U);
+#endif
 }
 
 ///@}
