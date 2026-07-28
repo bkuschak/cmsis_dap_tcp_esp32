@@ -25,8 +25,17 @@
  *
  *---------------------------------------------------------------------------*/
 
+#include "freertos/FreeRTOS.h"
+
 #include "DAP_config.h"
 #include "DAP.h"
+
+// Bit-banged SWCLK/SWDIO timing is not interrupt-safe: a WiFi/tick ISR
+// landing mid-transfer stretches whatever clock half-period is in progress
+// by an uncontrolled amount. Protect one SWD_Transfer() at a time (not the
+// whole DAP_ProcessCommand call) so unrelated interrupts still get serviced
+// between individual register transfers.
+static portMUX_TYPE swd_transfer_mux = portMUX_INITIALIZER_UNLOCKED;
 
 
 // SW Macros
@@ -66,6 +75,8 @@ void SWJ_Sequence (uint32_t count, const uint8_t *data) {
   uint32_t val;
   uint32_t n;
 
+  portENTER_CRITICAL(&swd_transfer_mux);
+
   val = 0U;
   n = 0U;
   while (count--) {
@@ -82,6 +93,8 @@ void SWJ_Sequence (uint32_t count, const uint8_t *data) {
     val >>= 1;
     n--;
   }
+
+  portEXIT_CRITICAL(&swd_transfer_mux);
 }
 #endif
 
@@ -96,6 +109,8 @@ void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
   uint32_t val;
   uint32_t bit;
   uint32_t n, k;
+
+  portENTER_CRITICAL(&swd_transfer_mux);
 
   n = info & SWD_SEQUENCE_CLK;
   if (n == 0U) {
@@ -122,6 +137,8 @@ void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
       }
     }
   }
+
+  portEXIT_CRITICAL(&swd_transfer_mux);
 }
 #endif
 
@@ -275,11 +292,17 @@ SWD_TransferFunction(Slow)
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
 uint8_t  SWD_Transfer(uint32_t request, uint32_t *data) {
+  uint8_t ack;
+
+  portENTER_CRITICAL(&swd_transfer_mux);
   if (DAP_Data->fast_clock) {
-    return SWD_TransferFast(request, data);
+    ack = SWD_TransferFast(request, data);
   } else {
-    return SWD_TransferSlow(request, data);
+    ack = SWD_TransferSlow(request, data);
   }
+  portEXIT_CRITICAL(&swd_transfer_mux);
+
+  return ack;
 }
 
 

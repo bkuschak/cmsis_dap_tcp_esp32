@@ -25,8 +25,17 @@
  *
  *---------------------------------------------------------------------------*/
 
+#include "freertos/FreeRTOS.h"
+
 #include "DAP_config.h"
 #include "DAP.h"
+
+// Bit-banged TCK/TMS/TDI/TDO timing is not interrupt-safe: a WiFi/tick ISR
+// landing mid-transfer stretches whatever clock half-period is in progress
+// by an uncontrolled amount. Protect one JTAG operation at a time (not the
+// whole DAP_ProcessCommand call) so unrelated interrupts still get serviced
+// between individual operations.
+static portMUX_TYPE jtag_transfer_mux = portMUX_INITIALIZER_UNLOCKED;
 
 
 // JTAG Macros
@@ -81,6 +90,8 @@ void JTAG_Sequence (uint32_t info, const uint8_t *tdi, uint8_t *tdo) {
   uint32_t bit;
   uint32_t n, k;
 
+  portENTER_CRITICAL(&jtag_transfer_mux);
+
   n = info & JTAG_SEQUENCE_TCK;
   if (n == 0U) {
     n = 64U;
@@ -106,6 +117,8 @@ void JTAG_Sequence (uint32_t info, const uint8_t *tdi, uint8_t *tdo) {
       *tdo++ = (uint8_t)o_val;
     }
   }
+
+  portEXIT_CRITICAL(&jtag_transfer_mux);
 }
 
 
@@ -269,6 +282,8 @@ uint32_t JTAG_ReadIDCode (void) {
   uint32_t val;
   uint32_t n;
 
+  portENTER_CRITICAL(&jtag_transfer_mux);
+
   PIN_TMS_SET();
   JTAG_CYCLE_TCK();                         /* Select-DR-Scan */
   PIN_TMS_CLR();
@@ -293,6 +308,8 @@ uint32_t JTAG_ReadIDCode (void) {
   PIN_TMS_CLR();
   JTAG_CYCLE_TCK();                         /* Idle */
 
+  portEXIT_CRITICAL(&jtag_transfer_mux);
+
   return (val);
 }
 
@@ -302,6 +319,8 @@ uint32_t JTAG_ReadIDCode (void) {
 //   return: none
 void JTAG_WriteAbort (uint32_t data) {
   uint32_t n;
+
+  portENTER_CRITICAL(&jtag_transfer_mux);
 
   PIN_TMS_SET();
   JTAG_CYCLE_TCK();                         /* Select-DR-Scan */
@@ -339,6 +358,8 @@ void JTAG_WriteAbort (uint32_t data) {
   PIN_TMS_CLR();
   JTAG_CYCLE_TCK();                         /* Idle */
   PIN_TDI_OUT(1U);
+
+  portEXIT_CRITICAL(&jtag_transfer_mux);
 }
 
 
@@ -346,11 +367,13 @@ void JTAG_WriteAbort (uint32_t data) {
 //   ir:     IR value
 //   return: none
 void JTAG_IR (uint32_t ir) {
+  portENTER_CRITICAL(&jtag_transfer_mux);
   if (DAP_Data->fast_clock) {
     JTAG_IR_Fast(ir);
   } else {
     JTAG_IR_Slow(ir);
   }
+  portEXIT_CRITICAL(&jtag_transfer_mux);
 }
 
 
@@ -359,11 +382,17 @@ void JTAG_IR (uint32_t ir) {
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
 uint8_t  JTAG_Transfer(uint32_t request, uint32_t *data) {
+  uint8_t ack;
+
+  portENTER_CRITICAL(&jtag_transfer_mux);
   if (DAP_Data->fast_clock) {
-    return JTAG_TransferFast(request, data);
+    ack = JTAG_TransferFast(request, data);
   } else {
-    return JTAG_TransferSlow(request, data);
+    ack = JTAG_TransferSlow(request, data);
   }
+  portEXIT_CRITICAL(&jtag_transfer_mux);
+
+  return ack;
 }
 
 
