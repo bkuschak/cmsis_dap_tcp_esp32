@@ -166,7 +166,7 @@ void uart_bridge_print_status(void)
         }
     }
     if (!any)
-        printf("UART bridge: not running.\n");
+        fprintf(stdout, "UART bridge: not running.\n");
 }
 
 static void uart_bridge_task(void* arg)
@@ -178,14 +178,16 @@ static void uart_bridge_task(void* arg)
 
     int slot = reserve_resources(&state);
     if (slot < 0) {
-        fprintf(stderr, "UART bridge: resource conflict on port or UART.\n");
+        fprintf(stderr, "UART%d bridge: resource conflict on port or UART.\n",
+                config.uart_num);
         vTaskDelete(NULL);
         return;
     }
 
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listen_fd < 0) {
-        perror("UART bridge: Failed to create socket");
+        fprintf(stderr, "UART%d bridge: Failed to create socket: %s\n",
+                config.uart_num, strerror(errno));
         release_resources(slot);
         vTaskDelete(NULL);
         return;
@@ -202,14 +204,16 @@ static void uart_bridge_task(void* arg)
     server_addr.sin_port = htons(config.port);
     ret = bind(listen_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
     if(ret < 0) {
-        perror("UART bridge: failed to bind socket");
+        fprintf(stderr, "UART%d bridge: failed to bind socket: %s\n",
+                config.uart_num, strerror(errno));
         release_resources(slot);
         vTaskDelete(NULL);
         return;
     }
     ret = listen(listen_fd, 1);
     if(ret < 0) {
-        perror("UART bridge: failed to listen on socket");
+        fprintf(stderr, "UART%d bridge: failed to listen on socket: %s\n",
+                config.uart_num, strerror(errno));
         release_resources(slot);
         vTaskDelete(NULL);
         return;
@@ -219,7 +223,8 @@ static void uart_bridge_task(void* arg)
     ret = uart_driver_install(config.uart_num,
             UART_BUFFER_SIZE, UART_BUFFER_SIZE, 0, NULL, 0);
     if(ret != ESP_OK) {
-        fprintf(stderr, "UART bridge: UART driver installation failed\n");
+        fprintf(stderr, "UART%d bridge: UART driver installation failed\n",
+                config.uart_num);
         release_resources(slot);
         vTaskDelete(NULL);
         return;
@@ -239,8 +244,8 @@ static void uart_bridge_task(void* arg)
 
     if(config.txd_pin != UART_PIN_NO_CHANGE ||
        config.rxd_pin != UART_PIN_NO_CHANGE) {
-        fprintf(stderr, "UART bridge: remapping UART%d TX = GPIO_NUM_%d, "
-                "RX = GPIO_NUM_%d.\n", config.uart_num, config.txd_pin,
+        fprintf(stderr, "UART%d bridge: GPIOs: TX=%d RX=%d.\n",
+                config.uart_num, config.txd_pin,
                 config.rxd_pin);
 
         // Disable any GPIO output drive on these pins before handing them
@@ -283,7 +288,8 @@ static void uart_bridge_task(void* arg)
         int activity = select(max_fd+1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
             //ESP_LOGE(TAG, "select failed: errno %d", errno);
-            perror("UART bridge: select error");
+            fprintf(stderr, "UART%d bridge: select error: %s\n",
+                    config.uart_num, strerror(errno));
             break;
         }
 
@@ -295,7 +301,8 @@ static void uart_bridge_task(void* arg)
             if(new_fd < 0) {
                 if(errno != EAGAIN && errno != EWOULDBLOCK) {
                     // Just ignore error for now.
-                    perror("UART bridge: accept error");
+                    fprintf(stderr, "UART%d bridge: accept error: %s\n",
+                            config.uart_num, strerror(errno));
                 }
             }
             else {
@@ -306,8 +313,9 @@ static void uart_bridge_task(void* arg)
                     inet_ntop(AF_INET, &client_addr.sin_addr, state.client_ip_str,
                             sizeof(state.client_ip_str));
                     state.client_port = ntohs(client_addr.sin_port);
-                    fprintf(stdout, "UART bridge: client connected %s:%d\n",
-                            state.client_ip_str, state.client_port);
+                    fprintf(stdout, "UART%d bridge: client connected %s:%d\n",
+                            config.uart_num, state.client_ip_str,
+                            state.client_port);
 
                     if(config.keepalive_timeout > 0) {
                     // Use TCP keepalives to detect dead clients.
@@ -329,7 +337,8 @@ static void uart_bridge_task(void* arg)
                     // Open UART.
                     uart_fd = open(uart_addr, O_RDWR);
                     if(uart_fd < 0) {
-                        perror("UART bridge: failed opening UART");
+                        fprintf(stderr, "UART%d bridge: failed opening UART: %s\n",
+                                config.uart_num, strerror(errno));
                         close(client_fd);
                         client_fd = -1;
                     }
@@ -345,8 +354,9 @@ static void uart_bridge_task(void* arg)
                     continue;
                 }
                 else {
-                    fprintf(stderr, "UART bridge: dropping new connection. "
-                            "Another client is already connected.\n");
+                    fprintf(stderr, "UART%d bridge: dropping new connection. "
+                            "Another client is already connected.\n",
+                            config.uart_num);
                     close(new_fd);
                 }
             }
@@ -358,7 +368,8 @@ static void uart_bridge_task(void* arg)
             if(ret == 0 ||
               (ret < 0 && (errno == ECONNABORTED || errno == ENOTCONN))) {
                 // Client has disconnected.
-                fprintf(stdout, "UART bridge: client disconnected.\n");
+                fprintf(stdout, "UART%d bridge: client disconnected.\n",
+                        config.uart_num);
                 close(client_fd);
                 close(uart_fd);
                 client_fd = -1;
@@ -370,7 +381,8 @@ static void uart_bridge_task(void* arg)
             }
             else if(ret < 0) {
                 if(errno != EAGAIN && errno != EWOULDBLOCK)
-                    perror("UART bridge: socket read error");
+                    fprintf(stderr, "UART%d bridge: socket read error: %s\n",
+                            config.uart_num, strerror(errno));
             }
             else {
                 write(uart_fd, state.buffer, ret);
@@ -383,7 +395,8 @@ static void uart_bridge_task(void* arg)
             ret = read(uart_fd, state.buffer, sizeof(state.buffer)-1);
             if(ret <= 0) {
                 if(errno != EAGAIN && errno != EWOULDBLOCK)
-                    perror("UART bridge: UART read error");
+                    fprintf(stderr, "UART%d bridge: UART read error: %s\n",
+                            config.uart_num, strerror(errno));
             }
             else {
                 state.count_rx += ret;
@@ -392,7 +405,7 @@ static void uart_bridge_task(void* arg)
         }
     }
 
-    fprintf(stdout, "UART bridge: shutting down.\n");
+    fprintf(stdout, "UART%d bridge: shutting down.\n", config.uart_num);
     state.client_connected = false;
     state.count_rx = 0;
     state.count_tx = 0;

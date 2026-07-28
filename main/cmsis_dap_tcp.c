@@ -370,6 +370,11 @@ void cmsis_dap_tcp_task(void *arg)
 
     cmsis_dap_gpio_config = &config->gpio;
     DAP_Data = &state->dap_data;
+    fprintf(stdout, "cmsis_dap_tcp: GPIOs: SWCLK=%d SWDIO=%d TDI=%d TDO=%d "
+            "NTRST=%d NRESET=%d LED=%d\n",
+            config->gpio.swclk_tck, config->gpio.swdio_tms, config->gpio.tdi,
+            config->gpio.tdo, config->gpio.ntrst, config->gpio.nreset,
+            config->gpio.led);
     DAP_Setup();
 
 #ifdef CONFIG_LWIP_IPV6
@@ -437,7 +442,11 @@ void cmsis_dap_tcp_task(void *arg)
     set_nonblocking(listener_fd);
     fprintf(stdout, "cmsis_dap_tcp: maximum packet size is %d bytes.\n",
             DAP_PKT_SIZE);
-    fprintf(stdout, "cmsis_dap_tcp: listening on port %d.\n", config->port);
+    fprintf(stdout, "cmsis_dap_tcp: listening on port %d. GPIOs: SWCLK=%d "
+            "SWDIO=%d TDI=%d TDO=%d NTRST=%d NRESET=%d LED=%d\n",
+            config->port, config->gpio.swclk_tck, config->gpio.swdio_tms,
+            config->gpio.tdi, config->gpio.tdo, config->gpio.ntrst,
+            config->gpio.nreset, config->gpio.led);
 
     msgbuf_init(&state->buf);
 
