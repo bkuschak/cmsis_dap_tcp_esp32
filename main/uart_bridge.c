@@ -115,6 +115,8 @@ void uart_bridge_print_status(void)
     struct {
         bool active;
         bool client_connected;
+        int txd_pin;
+        int rxd_pin;
         int port;
         int uart_num;
         int client_port;
@@ -132,6 +134,8 @@ void uart_bridge_print_status(void)
             continue;
         snapshot[i].active = true;
         snapshot[i].client_connected = state->client_connected;
+        snapshot[i].txd_pin = state->config->txd_pin;
+        snapshot[i].rxd_pin = state->config->rxd_pin;
         snapshot[i].port = state->config->port;
         snapshot[i].uart_num = state->config->uart_num;
         snapshot[i].client_port = state->client_port;
@@ -148,14 +152,17 @@ void uart_bridge_print_status(void)
             continue;
         any = true;
         if (snapshot[i].client_connected) {
-            printf("UART%d bridge: listening on port %d, connected "
-                    "to client '%s:%d'. TX: %lu bytes, RX: %lu bytes.\n",
+            fprintf(stdout, "UART%d bridge: port %d connected to '%s:%d'. "
+                    "GPIOs: TX=%d RX=%d. Bytes: TX=%lu RX=%lu.\n",
                     snapshot[i].uart_num, snapshot[i].port,
                     snapshot[i].client_ip_str, snapshot[i].client_port,
+                    snapshot[i].txd_pin, snapshot[i].rxd_pin,
                     snapshot[i].count_tx, snapshot[i].count_rx);
         } else {
-            printf("UART%d bridge: listening on port %d.\n",
-                    snapshot[i].uart_num, snapshot[i].port);
+            fprintf(stdout, "UART%d bridge: Listening on port %d. GPIOs: TX=%d"
+                    " RX=%d.\n",
+                    snapshot[i].uart_num, snapshot[i].port,
+                    snapshot[i].txd_pin, snapshot[i].rxd_pin);
         }
     }
     if (!any)
