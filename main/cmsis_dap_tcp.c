@@ -67,7 +67,7 @@ struct cmsis_dap_tcp_packet_hdr {
     uint8_t reserved;           // Reserved for future use.
 } __attribute__((__packed__));
 
-#define DAP_TOTAL_PKT_SIZE sizeof(struct cmsis_dap_tcp_packet_hdr)+DAP_PKT_SIZE
+#define DAP_TOTAL_PKT_SIZE (sizeof(struct cmsis_dap_tcp_packet_hdr)+DAP_PKT_SIZE)
 
 struct msgbuf_t {
     uint8_t  data[3*DAP_TOTAL_PKT_SIZE];
