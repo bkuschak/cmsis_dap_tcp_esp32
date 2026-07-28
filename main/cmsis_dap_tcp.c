@@ -516,8 +516,9 @@ void cmsis_dap_tcp_task(void *arg)
 
         // Data from client?
         if (client_fd >= 0 && FD_ISSET(client_fd, &read_fds)) {
-            if (msgbuf_add(&state->buf, client_fd) < 0) {
-                if(errno != ENOSPC) {
+            int add_ret = msgbuf_add(&state->buf, client_fd);
+            if (add_ret < 0) {
+                if(add_ret != -ENOSPC) {
                     fprintf(stdout, "cmsis_dap_tcp: client disconnected.\n");
                     close(client_fd);
                     client_fd = -1;
