@@ -288,6 +288,22 @@ menu "CMSIS-DAP configuration"
 
     endmenu
 
+    config ESP_DAP_VENDOR_ID
+        string "CMSIS-DAP vendor string"
+        default "OpenOCD"
+        help
+            Reported to the host (e.g. OpenOCD) as the CMSIS-DAP vendor
+            string.
+
+    config ESP_DAP_PRODUCT_ID
+        string "CMSIS-DAP product string"
+        default "CMSIS-DAP-TCP device"
+        help
+            Reported to the host (e.g. OpenOCD) as the CMSIS-DAP product
+            string. Board-specific sdkconfig fragments should override this
+            with something identifying the board, e.g.
+            "CMSIS-DAP-TCP Xiao ESP32-C6 alt".
+
     config ESP_DAP_TCP_PORT
         int "CMSIS-DAP TCP port number"
         default 4441

@@ -223,7 +223,11 @@ static const char TargetBoardName    [] = TARGET_BOARD_NAME;
 */
 __STATIC_INLINE uint8_t DAP_GetVendorString (char *str)
 {
+#ifdef CONFIG_ESP_DAP_VENDOR_ID
+    const char *vendor = CONFIG_ESP_DAP_VENDOR_ID;
+#else
     const char *vendor = "OpenOCD";
+#endif
     int maxlen = 60;
     strncpy(str, vendor, maxlen);
     str[maxlen-1] = '\0';
@@ -236,9 +240,13 @@ __STATIC_INLINE uint8_t DAP_GetVendorString (char *str)
 */
 __STATIC_INLINE uint8_t DAP_GetProductString (char *str)
 {
-    const char *vendor = "ESP32-C6 CMSIS-DAP-TCP device";
+#ifdef CONFIG_ESP_DAP_PRODUCT_ID
+    const char *product = CONFIG_ESP_DAP_PRODUCT_ID;
+#else
+    const char *product = "CMSIS-DAP-TCP on ESP32";
+#endif
     int maxlen = 60;
-    strncpy(str, vendor, maxlen);
+    strncpy(str, product, maxlen);
     str[maxlen-1] = '\0';
     return strlen(str) + 1;
 }
