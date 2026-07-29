@@ -25,6 +25,7 @@
  *
  *---------------------------------------------------------------------------*/
 
+#include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 
 #include "DAP_config.h"
@@ -84,13 +85,18 @@ static portMUX_TYPE jtag_transfer_mux = portMUX_INITIALIZER_UNLOCKED;
 //   tdi:    pointer to TDI generated data
 //   tdo:    pointer to TDO captured data
 //   return: none
-void JTAG_Sequence (uint32_t info, const uint8_t *tdi, uint8_t *tdo) {
+void IRAM_ATTR JTAG_Sequence (uint32_t info, const uint8_t *tdi, uint8_t *tdo) {
   uint32_t i_val;
   uint32_t o_val;
   uint32_t bit;
   uint32_t n, k;
 
   portENTER_CRITICAL(&jtag_transfer_mux);
+
+  /* Force a consistent phase offset between GPIO clock and CPU clock to avoid
+   * duty cycle variation across transfers.
+   */
+  PIN_TDO_IN();
 
   n = info & JTAG_SEQUENCE_TCK;
   if (n == 0U) {
@@ -126,8 +132,13 @@ void JTAG_Sequence (uint32_t info, const uint8_t *tdi, uint8_t *tdo) {
 //   ir:     IR value
 //   return: none
 #define JTAG_IR_Function(speed) /**/                                            \
-static void JTAG_IR_##speed (uint32_t ir) {                                     \
+static void IRAM_ATTR JTAG_IR_##speed (uint32_t ir) {                           \
   uint32_t n;                                                                   \
+                                                                                \
+  /* Force a consistent phase offset between GPIO clock and CPU clock to avoid  \
+   * duty cycle variation across transfers.                                     \
+   */                                                                           \
+  PIN_TDO_IN();                                                                 \
                                                                                 \
   PIN_TMS_SET();                                                                \
   JTAG_CYCLE_TCK();                         /* Select-DR-Scan */                \
@@ -170,11 +181,16 @@ static void JTAG_IR_##speed (uint32_t ir) {                                     
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
 #define JTAG_TransferFunction(speed)        /**/                                \
-static uint8_t JTAG_Transfer##speed (uint32_t request, uint32_t *data) {        \
+static uint8_t IRAM_ATTR JTAG_Transfer##speed (uint32_t request, uint32_t *data) { \
   uint32_t ack;                                                                 \
   uint32_t bit;                                                                 \
   uint32_t val;                                                                 \
   uint32_t n;                                                                   \
+                                                                                \
+  /* Force a consistent phase offset between GPIO clock and CPU clock to avoid  \
+   * duty cycle variation across transfers.                                     \
+   */                                                                           \
+  PIN_TDO_IN();                                                                 \
                                                                                 \
   PIN_TMS_SET();                                                                \
   JTAG_CYCLE_TCK();                         /* Select-DR-Scan */                \
@@ -277,12 +293,17 @@ JTAG_TransferFunction(Slow)
 
 // JTAG Read IDCODE register
 //   return: value read
-uint32_t JTAG_ReadIDCode (void) {
+uint32_t IRAM_ATTR JTAG_ReadIDCode (void) {
   uint32_t bit;
   uint32_t val;
   uint32_t n;
 
   portENTER_CRITICAL(&jtag_transfer_mux);
+
+  /* Force a consistent phase offset between GPIO clock and CPU clock to avoid
+   * duty cycle variation across transfers.
+   */
+  PIN_TDO_IN();
 
   PIN_TMS_SET();
   JTAG_CYCLE_TCK();                         /* Select-DR-Scan */
@@ -317,10 +338,15 @@ uint32_t JTAG_ReadIDCode (void) {
 // JTAG Write ABORT register
 //   data:   value to write
 //   return: none
-void JTAG_WriteAbort (uint32_t data) {
+void IRAM_ATTR JTAG_WriteAbort (uint32_t data) {
   uint32_t n;
 
   portENTER_CRITICAL(&jtag_transfer_mux);
+
+  /* Force a consistent phase offset between GPIO clock and CPU clock to avoid
+   * duty cycle variation across transfers.
+   */
+  PIN_TDO_IN();
 
   PIN_TMS_SET();
   JTAG_CYCLE_TCK();                         /* Select-DR-Scan */
@@ -366,7 +392,7 @@ void JTAG_WriteAbort (uint32_t data) {
 // JTAG Set IR
 //   ir:     IR value
 //   return: none
-void JTAG_IR (uint32_t ir) {
+void IRAM_ATTR JTAG_IR (uint32_t ir) {
   portENTER_CRITICAL(&jtag_transfer_mux);
   if (DAP_Data->fast_clock) {
     JTAG_IR_Fast(ir);
@@ -381,7 +407,7 @@ void JTAG_IR (uint32_t ir) {
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
-uint8_t  JTAG_Transfer(uint32_t request, uint32_t *data) {
+uint8_t  IRAM_ATTR JTAG_Transfer(uint32_t request, uint32_t *data) {
   uint8_t ack;
 
   portENTER_CRITICAL(&jtag_transfer_mux);

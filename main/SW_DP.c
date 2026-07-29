@@ -25,6 +25,7 @@
  *
  *---------------------------------------------------------------------------*/
 
+#include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 
 #include "DAP_config.h"
@@ -71,11 +72,16 @@ static portMUX_TYPE swd_transfer_mux = portMUX_INITIALIZER_UNLOCKED;
 //   data:   pointer to sequence bit data
 //   return: none
 #if ((DAP_SWD != 0) || (DAP_JTAG != 0))
-void SWJ_Sequence (uint32_t count, const uint8_t *data) {
+void IRAM_ATTR SWJ_Sequence (uint32_t count, const uint8_t *data) {
   uint32_t val;
   uint32_t n;
 
   portENTER_CRITICAL(&swd_transfer_mux);
+
+  /* Force a consistent phase offset between GPIO clock and CPU clock to reduce
+   * duty cycle variation across transfers.
+   */
+  PIN_SWDIO_IN();
 
   val = 0U;
   n = 0U;
@@ -105,7 +111,7 @@ void SWJ_Sequence (uint32_t count, const uint8_t *data) {
 //   swdi:   pointer to SWDIO captured data
 //   return: none
 #if (DAP_SWD != 0)
-void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
+void IRAM_ATTR SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
   uint32_t val;
   uint32_t bit;
   uint32_t n, k;
@@ -116,6 +122,11 @@ void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
   if (n == 0U) {
     n = 64U;
   }
+
+  /* Force a consistent phase offset between GPIO clock and CPU clock to reduce
+   * duty cycle variation across transfers.
+   */
+  PIN_SWDIO_IN();
 
   if (info & SWD_SEQUENCE_DIN) {
     while (n) {
@@ -151,13 +162,18 @@ void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
 #define SWD_TransferFunction(speed)     /**/                                    \
-static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         \
+static uint8_t IRAM_ATTR SWD_Transfer##speed (uint32_t request, uint32_t *data) { \
   uint32_t ack;                                                                 \
   uint32_t bit;                                                                 \
   uint32_t val;                                                                 \
   uint32_t parity;                                                              \
                                                                                 \
   uint32_t n;                                                                   \
+                                                                                \
+  /* Force a consistent phase offset between GPIO clock and CPU clock to reduce \
+   * duty cycle variation across transfers.                                     \
+   */                                                                           \
+  PIN_SWDIO_IN();                                                               \
                                                                                 \
   /* Packet Request */                                                          \
   parity = 0U;                                                                  \
@@ -180,7 +196,7 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
                                                                                 \
   /* Turnaround */                                                              \
   PIN_SWDIO_OUT_DISABLE();                                                      \
-  for (n = DAP_Data->swd_conf.turnaround; n; n--) {                              \
+  for (n = DAP_Data->swd_conf.turnaround; n; n--) {                             \
     SW_CLOCK_CYCLE();                                                           \
   }                                                                             \
                                                                                 \
@@ -210,13 +226,13 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
       }                                                                         \
       if (data) { *data = val; }                                                \
       /* Turnaround */                                                          \
-      for (n = DAP_Data->swd_conf.turnaround; n; n--) {                          \
+      for (n = DAP_Data->swd_conf.turnaround; n; n--) {                         \
         SW_CLOCK_CYCLE();                                                       \
       }                                                                         \
       PIN_SWDIO_OUT_ENABLE();                                                   \
     } else {                                                                    \
       /* Turnaround */                                                          \
-      for (n = DAP_Data->swd_conf.turnaround; n; n--) {                          \
+      for (n = DAP_Data->swd_conf.turnaround; n; n--) {                         \
         SW_CLOCK_CYCLE();                                                       \
       }                                                                         \
       PIN_SWDIO_OUT_ENABLE();                                                   \
@@ -232,10 +248,10 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
     }                                                                           \
     /* Capture Timestamp */                                                     \
     if (request & DAP_TRANSFER_TIMESTAMP) {                                     \
-      DAP_Data->timestamp = TIMESTAMP_GET();                                     \
+      DAP_Data->timestamp = TIMESTAMP_GET();                                    \
     }                                                                           \
     /* Idle cycles */                                                           \
-    n = DAP_Data->transfer.idle_cycles;                                          \
+    n = DAP_Data->transfer.idle_cycles;                                         \
     if (n) {                                                                    \
       PIN_SWDIO_OUT(0U);                                                        \
       for (; n; n--) {                                                          \
@@ -254,7 +270,7 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
       }                                                                         \
     }                                                                           \
     /* Turnaround */                                                            \
-    for (n = DAP_Data->swd_conf.turnaround; n; n--) {                            \
+    for (n = DAP_Data->swd_conf.turnaround; n; n--) {                           \
       SW_CLOCK_CYCLE();                                                         \
     }                                                                           \
     PIN_SWDIO_OUT_ENABLE();                                                     \
@@ -269,7 +285,7 @@ static uint8_t SWD_Transfer##speed (uint32_t request, uint32_t *data) {         
   }                                                                             \
                                                                                 \
   /* Protocol error */                                                          \
-  for (n = DAP_Data->swd_conf.turnaround + 32U + 1U; n; n--) {                   \
+  for (n = DAP_Data->swd_conf.turnaround + 32U + 1U; n; n--) {                  \
     SW_CLOCK_CYCLE();                   /* Back off data phase */               \
   }                                                                             \
   PIN_SWDIO_OUT_ENABLE();                                                       \
@@ -291,7 +307,7 @@ SWD_TransferFunction(Slow)
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
-uint8_t  SWD_Transfer(uint32_t request, uint32_t *data) {
+uint8_t  IRAM_ATTR SWD_Transfer(uint32_t request, uint32_t *data) {
   uint8_t ack;
 
   portENTER_CRITICAL(&swd_transfer_mux);
