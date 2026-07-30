@@ -199,22 +199,25 @@ This information includes:
 /// The Debug Unit may be part of an evaluation board and always connected to a fixed
 /// known device. In this case a Device Vendor, Device Name, Board Vendor and Board Name strings
 /// are stored and may be used by the debugger or IDE to configure device parameters.
+#ifdef CONFIG_ESP_DAP_TARGET_FIXED
+#define TARGET_FIXED            1               ///< Target: 1 = known, 0 = unknown;
+#else
 #define TARGET_FIXED            0               ///< Target: 1 = known, 0 = unknown;
-
-#define TARGET_DEVICE_VENDOR    "Arm"           ///< String indicating the Silicon Vendor
-#define TARGET_DEVICE_NAME      "Cortex-M"      ///< String indicating the Target Device
-#define TARGET_BOARD_VENDOR     "Arm"           ///< String indicating the Board Vendor
-#define TARGET_BOARD_NAME       "Arm board"     ///< String indicating the Board Name
+#endif
 
 // Pointer to the GPIO port used for SWD, JTAG, and RESET.
 static gpio_dev_t *const gpio_dev_ptr = &GPIO;
 
 #if TARGET_FIXED != 0
 #include <string.h>
-static const char TargetDeviceVendor [] = TARGET_DEVICE_VENDOR;
-static const char TargetDeviceName   [] = TARGET_DEVICE_NAME;
-static const char TargetBoardVendor  [] = TARGET_BOARD_VENDOR;
-static const char TargetBoardName    [] = TARGET_BOARD_NAME;
+/// String indicating the Silicon Vendor
+static const char TargetDeviceVendor [] = CONFIG_ESP_DAP_TARGET_DEVICE_VENDOR;
+/// String indicating the Target Device
+static const char TargetDeviceName   [] = CONFIG_ESP_DAP_TARGET_DEVICE_NAME;
+/// String indicating the Board Vendor
+static const char TargetBoardVendor  [] = CONFIG_ESP_DAP_TARGET_BOARD_VENDOR;
+/// String indicating the Board Name
+static const char TargetBoardName    [] = CONFIG_ESP_DAP_TARGET_BOARD_NAME;
 #endif
 
 /** Get Vendor Name string.

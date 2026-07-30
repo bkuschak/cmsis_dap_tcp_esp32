@@ -304,6 +304,48 @@ menu "CMSIS-DAP configuration"
             with something identifying the board, e.g.
             "CMSIS-DAP-TCP Xiao ESP32-C6 alt".
 
+    config ESP_DAP_TARGET_FIXED
+        bool "Report a Fixed Target device/board to the host"
+        default n
+        help
+            Report the TARGET_DEVICE/TARGET_BOARD DAP_Info strings below
+            to the host. This is intended to be used when the Debug Unit
+            is permanently connected to a single target, such as being
+            integrated onto the same PCB. If that is not the case, then
+            leave this disabled.
+
+    config ESP_DAP_TARGET_DEVICE_VENDOR
+        string "Fixed Target silicon device vendor string"
+        default ""
+        depends on ESP_DAP_TARGET_FIXED
+        help
+            Reported to the host as the Target Device Vendor string.
+            Usually the silicon vendor name, such as Arm.
+
+    config ESP_DAP_TARGET_DEVICE_NAME
+        string "Fixed Target silicon device name string"
+        default ""
+        depends on ESP_DAP_TARGET_FIXED
+        help
+            Reported to the host as the Target Device Name string.
+            Usually the silicon device name, such as Cortex-M3.
+
+    config ESP_DAP_TARGET_BOARD_VENDOR
+        string "Fixed Target board vendor string"
+        default ""
+        depends on ESP_DAP_TARGET_FIXED
+        help
+            Reported to the host as the Target Board Vendor string.
+            Usually the manufacturer name of the PCB.
+
+    config ESP_DAP_TARGET_BOARD_NAME
+        string "Fixed Target board name string"
+        default ""
+        depends on ESP_DAP_TARGET_FIXED
+        help
+            Reported to the host as the Target Board Name string.
+            Usually the model name of the board itself.
+
     config ESP_DAP_TCP_PORT
         int "CMSIS-DAP TCP port number"
         default 4441
