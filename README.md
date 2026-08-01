@@ -36,9 +36,23 @@ board.
   6 seconds for a 64KB image.
   - Performance depends on the quality of your WiFi network.
 
-![Xiao ESP32-C6 pinout](img/xiao_esp32c6_pinout.png)
+# Supported boards
+
+The following boards were tested so far. They were chosen because they are
+inexpensive and readily available from Amazon, AliExpress, Seeed Studio,
+DigiKey, etc.
+
+- Expressif [ESP32-S3 Devkit C1](https://www.digikey.com/en/products/detail/espressif-systems/ESP32-S3-DEVKITC-1-N8R8/15295894) and clones
+- Unbranded HW-466AB [ESP32-C3 Super Mini](https://www.aliexpress.us/w/wholesale-esp32-c3-super-mini.html)
+- Seeed Studio [XIAO ESP32-C6](https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html)
+
+Pinouts are configurable, but these are the defaults:
 
 ![ESP32-S3-Devkit-C1 pinout](img/esp32s3_devkitc_1.png)
+
+![ESP32-C3 Super Mini pinout](img/esp32c3_super_mini.png)
+
+![XIAO ESP32-C6 pinout](img/xiao_esp32c6_pinout.png)
 
 The CMSIS-DAP code came from the Firmware directory of the [CMSIS-DAP
 repo](https://github.com/ARM-software/CMSIS-DAP). ```DAP_config.h``` was then
@@ -52,7 +66,7 @@ commit 1fd47bed772ea40923472c90dfe11516e76033ee (HEAD -> main, tag: v2.1.2, orig
 The software has some limitations:
 
 - SWO is currently unsupported.
-- Maximum clock rate is about 1000 KHz (ESP32C6 configured for 160 MHz / 80 MHz).
+- Maximum clock rate is ~5 MHz and duty cycle can vary from ~33% to ~66%.
 
 # Building and Flashing the Firmware
 
@@ -269,7 +283,7 @@ cmsis-dap backend tcp
 cmsis-dap tcp host 192.168.1.107
 cmsis-dap tcp port 4441
 transport select swd
-adapter speed 2000
+adapter speed 6000
 reset_config none
 ```
 
@@ -301,7 +315,7 @@ dd if=/dev/random of=random_96kb.bin bs=1024 count=96
 ./src/openocd --search tcl \
               -f tcl/interface/cmsis-dap-tcp.cfg \
               -f tcl/target/stm32f1x.cfg \
-              -c "adapter speed 5000" \
+              -c "adapter speed 6000" \
               -c "init; halt; reset; poll off" \
               -c "load_image random_96kb.bin 0x20000000" \
               -c "dump_image /dev/null 0x20000000 0x18000" \
@@ -325,10 +339,25 @@ and all debugging and flash programming is done over the network.
 
 # Performance
 
+The observed performance is summarized below. Your performance will depend on
+your particular WiFi network environment. The C6 seems to suffer due to a
+complex internal bus architecture that leads to lower throughput.
+
+| Board | Chip / arch | CPU clock | SWCLK speed (max) | SRAM write (avg) | SRAM read (avg) |
+|---|---|---|---|---|---|
+| ESP32-S3 DevKitC-1 | ESP32-S3, Xtensa | 240 MHz | 5.3 MHz | ~200 KB/sec | ~80 KB/sec |
+| ESP32-C3 Super Mini | ESP32-C3, RISC-V | 160 MHz | 5.0 MHz | ~175 KB/sec | ~80 KB/sec |
+| Xiao ESP32-C6 (alt) | ESP32-C6, RISC-V | 160 MHz | 1.4 MHz | ~90 KB/sec | ~50 KB/sec |
+
+<br>
+
+![performance](img/performance.svg)
+
 On the ESP32-S3 @ 240MHz, a single SWD 32-bit transfer completes in less than
-10 microseconds, with a maximum SWCLK clock rate of 5 MHz. The SWCLK duty cycle
-is not 50% and it may vary slightly from one transfer to the next. An SWD
-read cycle is pictured below. Yellow is SWCLK. Green is SWDIO.
+10 microseconds, with a maximum SWCLK clock rate of ~5 MHz. Due to
+bit-banging and clock domain crossing, the SWCLK duty cycle is not 50% and it
+may vary slightly from one transfer to the next. An SWD read cycle is pictured
+below. Yellow is SWCLK. Green is SWDIO.
 
 <br>
 
@@ -385,10 +414,36 @@ Info : Listening on port 3333 for gdb connections
 Info : accepting 'telnet' connection on tcp/4444
 ```
 
+## Using ESP32-S3 @ 240 MHz
+
+Performance is highest on ESP32-S3. The throughput seems more variable
+on each run, but here are some representative numbers connecting to an
+STM32F401RE target and reading and writing SRAM:
+
+```
+% telnet localhost 4444
+> poll off
+
+> load_image ./random_96kb.bin 0x20000000
+98304 bytes written at address 0x20000000
+downloaded 98304 bytes in 0.489488s (196.123 KiB/s)
+
+> dump_image /dev/null 0x20000000 0x18000
+dumped 98304 bytes in 0.832846s (115.267 KiB/s)
+```
+
+## Using ESP32-C3 @ 160 MHz
+
+ESP32-C3 running at 160 MHz is single core and lower frequency but its
+performance in this case is just slightly below the S3.
+
 ## Using ESP32-C6 @ 160 MHz
 
-Xiao ESP32C6 running at 160 MHz is the programmer board. Connecting to an
-STM32F401RE target and reading and writing SRAM:
+Xiao ESP32C6 running at 160 MHz is considerably slower. After multiple
+unsuccessful attempts to optimize peformance, it seems that the more complex
+internal bus structure leads to lower performance for the GPIO bit-banging.
+
+Connecting to an STM32F401RE target and reading and writing SRAM:
 
 ```
 % telnet localhost 4444
@@ -455,46 +510,25 @@ user    0m0.052s
 sys     0m0.155s
 ```
 
-## Using ESP32-S3 @ 240 MHz
-
-Performance is higher on ESP32-S3. The throughput seems more variable
-on each run, but here are some representative numbers for writing and
-reading SRAM:
-
-```
-% telnet localhost 4444
-> poll off
-
-> load_image ./random_96kb.bin 0x20000000
-98304 bytes written at address 0x20000000
-downloaded 98304 bytes in 0.489488s (196.123 KiB/s)
-
-> dump_image /dev/null 0x20000000 0x18000
-dumped 98304 bytes in 0.832846s (115.267 KiB/s)
-```
-
-<br>
-
-![performance](img/performance.svg)
-
-
 # Multiple interfaces / usage as a component
 
-Two additional features were added by [@w531t4](https://github.com/w531t4).
-Thank you!  These currently live on the ```w531t4-feat/multi_instance_safe```
-branch and will be merged to main after further testing is completed:
+Two additional features were added by [@w531t4](https://github.com/w531t4) and
+integrated into the project. Thank you!
 
 1) This cmsis_dap_tcp server may be incorporated as a component in another
 application.  Simply define your CMAKE_PROJECT_NAME as something other than
 “cmsis_dap_tcp_esp32”.  This will cause ```main.c``` to be left out of the
-project.  Replace the functionality of main.c with your own implementation.  Be
-sure to call ```cmsis_dap_tcp_start(NULL, "cmsis_dap_tcp_task", …);```
+project.  Replace the functionality of ```main.c``` with your own
+implementation.  Be sure to call ```cmsis_dap_tcp_start(&config,
+"cmsis_dap_tcp_task", …)``` and pass a valid ```cmsis_dap_tcp_config```
+structure to define the interface.
 
-2) A single ESP32 can now support multiple independent JTAG/SWD and UART
+2) A single ESP32 can support multiple independent JTAG/SWD and UART
 interfaces. Each one has its own GPIO pins and TCP port. This can be useful you
 have multiple CPUs, MCUs, FPGAs on a board with separate JTAG chains. To do
 this, use feature #1 above and call ```cmsis_dap_tcp_start()``` once for each
 interface.  Pass a valid ```cmsis_dap_tcp_config``` parameter to define the
 GPIO pin configuration for each interface.  If you’re using the UART bridge,
-start the uart_bridge_tasks by passing a ```uart_bridge_config``` parameter for
-each interface.  These parameters will override the menuconfig settings.
+call ```uart_bridge_start()``` once for each bridge. Pass a valid
+```uart_bridge_config``` parameter to define each interface.
+
