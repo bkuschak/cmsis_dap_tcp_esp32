@@ -842,6 +842,148 @@ menu "CMSIS-DAP configuration"
 
     endmenu
 
+    menu "ADC streaming"
+
+        config ESP_ADC_STREAM_ENABLED
+            bool "Enable ADC streaming over TCP"
+            default n
+            help
+                Streams ADC1 measurements (continuous/DMA mode) over TCP.
+                ADC2 is avoided since WiFi relies on it. Sampling starts on
+                client connect, stops on disconnect.
+
+        config ESP_ADC_STREAM_TCP_PORT
+            int "TCP port number"
+            default 4451
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                Select the TCP port number for the ADC streaming server.
+
+        config ESP_ADC_STREAM_USE_KEEPALIVE
+            bool "Enable TCP keep-alive packets and disconnect on timeout"
+            default y
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                To detect dead clients, use TCP keepalives and drop the
+                connection (stopping ADC sampling) if a timeout occurs.
+
+        config ESP_ADC_STREAM_KEEPALIVE_TIMEOUT
+            int "TCP keep-alive timeout in seconds"
+            default 10
+            depends on ESP_ADC_STREAM_ENABLED && ESP_ADC_STREAM_USE_KEEPALIVE
+            help
+                Drop the connection if a client does not respond for this
+                number of seconds.
+
+        config ESP_ADC_STREAM_GPIO
+            int "GPIO number for ADC1 input channel"
+            default 0
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                GPIO number to sample. Must be a valid ADC1 channel pin for
+                the target chip (board-specific sdkconfig fragments should
+                override this default). ADC2 is intentionally not
+                supported here since it conflicts with the WiFi driver.
+
+        config ESP_ADC_STREAM_SAMPLE_RATE_HZ
+            int "Output sample rate in Hz (after averaging)"
+            default 1000
+            range 1 83333
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                Rate measurements are sent at, after averaging. Raw ADC
+                rate = this x averaging count, must stay within ~611 Hz -
+                83.3 kHz; refused at connect time if not.
+
+        choice ESP_ADC_STREAM_AVERAGING_COUNT
+            prompt "Number of raw samples averaged per output sample"
+            default ESP_ADC_STREAM_AVERAGING_COUNT_16
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                Accumulated (not divided) and scaled to a 16-bit output via
+                a shift, so oversampled precision isn't rounded away. Every
+                4x buys ~1 extra bit, up to the 16-bit ceiling (16 = full
+                4 extra bits over native 12-bit; more reduces noise only).
+
+            config ESP_ADC_STREAM_AVERAGING_COUNT_1
+                bool "1 (no averaging)"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_2
+                bool "2"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_4
+                bool "4"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_8
+                bool "8"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_16
+                bool "16"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_32
+                bool "32"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_64
+                bool "64"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_128
+                bool "128"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_256
+                bool "256"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_512
+                bool "512"
+            config ESP_ADC_STREAM_AVERAGING_COUNT_1024
+                bool "1024"
+        endchoice
+
+        config ESP_ADC_STREAM_AVERAGING_COUNT
+            int
+            default 1 if ESP_ADC_STREAM_AVERAGING_COUNT_1
+            default 2 if ESP_ADC_STREAM_AVERAGING_COUNT_2
+            default 4 if ESP_ADC_STREAM_AVERAGING_COUNT_4
+            default 8 if ESP_ADC_STREAM_AVERAGING_COUNT_8
+            default 16 if ESP_ADC_STREAM_AVERAGING_COUNT_16
+            default 32 if ESP_ADC_STREAM_AVERAGING_COUNT_32
+            default 64 if ESP_ADC_STREAM_AVERAGING_COUNT_64
+            default 128 if ESP_ADC_STREAM_AVERAGING_COUNT_128
+            default 256 if ESP_ADC_STREAM_AVERAGING_COUNT_256
+            default 512 if ESP_ADC_STREAM_AVERAGING_COUNT_512
+            default 1024 if ESP_ADC_STREAM_AVERAGING_COUNT_1024
+
+        choice ESP_ADC_STREAM_FORMAT
+            prompt "Output format"
+            default ESP_ADC_STREAM_FORMAT_TEXT
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                Wire format for streamed measurements, in millivolts.
+
+            config ESP_ADC_STREAM_FORMAT_TEXT
+                bool "Text (integer mV, newline-terminated)"
+            config ESP_ADC_STREAM_FORMAT_BINARY16
+                bool "Binary (16-bit little-endian signed mV)"
+        endchoice
+
+        config ESP_ADC_STREAM_CORRECTION_CURVE_X1000000
+            int "Correction curvature, x1,000,000 (quadratic; 0 disables)"
+            default 0
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                Fixes residual nonlinearity beyond the eFuse calibration.
+                Applied before gain/offset: curved_mV = calibrated_mV +
+                curve_x1000000 * calibrated_mV^2 / 1,000,000. Fit a
+                parabola to several (measured, reference) points to derive
+                this. 0 disables it.
+
+        config ESP_ADC_STREAM_CORRECTION_GAIN_X1000
+            int "Correction gain, x1000 (1000 = 1.000, no gain correction)"
+            default 1000
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                Linear gain trim applied after the curvature correction:
+                corrected_mV = curved_mV * gain_x1000 / 1000 + offset_mV.
+
+        config ESP_ADC_STREAM_CORRECTION_OFFSET_MV
+            int "Correction offset, in mV"
+            default 0
+            depends on ESP_ADC_STREAM_ENABLED
+            help
+                Additive offset applied after the gain correction above.
+                May be negative.
+
+    endmenu
 
     config ESP_DAP_VENDOR_ID
         string "CMSIS-DAP vendor string"

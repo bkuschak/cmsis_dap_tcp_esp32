@@ -45,6 +45,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <inttypes.h>
 #include "sdkconfig.h"
 
@@ -78,6 +79,11 @@
 #include "DAP.h"
 #include "cmsis_dap_tcp.h"
 #include "uart_bridge.h"
+
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+#include "adc_stream.h"
+#include "soc/soc_caps.h"
+#endif
 
 #if defined(CONFIG_ESP_DAP_1_LED_RGB) || \
     defined(CONFIG_ESP_DAP_2_LED_RGB) || \
@@ -467,6 +473,108 @@ static int uart_cmd_handler(int argc, char **argv)
 }
 #endif
 
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+// ADC stream command argument structure.
+static struct {
+    struct arg_int *gpio;
+    struct arg_int *output_sps;
+    struct arg_int *averaging;
+    struct arg_str *format;
+    struct arg_end *end;
+} adc_args;
+
+static bool parse_adc_format(const char* format_str, enum adc_stream_format* out)
+{
+    if (strcasecmp(format_str, "text") == 0) {
+        *out = ADC_STREAM_FORMAT_TEXT;
+        return true;
+    }
+    if (strcasecmp(format_str, "binary16") == 0 ||
+            strcasecmp(format_str, "bin") == 0) {
+        *out = ADC_STREAM_FORMAT_BINARY16;
+        return true;
+    }
+    return false;
+}
+
+static int adc_cmd_handler(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &adc_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, adc_args.end, argv[0]);
+        printf("Usage: adc <gpio> <output_sps> <averaging> <format>\n");
+        printf("  averaging: power of 2 from 1 to 1024 (1 = no averaging)\n");
+        printf("  format: text or binary16\n");
+        printf("  Use output_sps 0 to clear stored settings and revert to "
+                "CONFIG defaults.\n");
+        return 1;
+    }
+
+    int gpio = adc_args.gpio->ival[0];
+    int output_sps = adc_args.output_sps->ival[0];
+    int averaging = adc_args.averaging->ival[0];
+    const char* format_str = adc_args.format->sval[0];
+
+    // An output rate of 0 clears the stored settings. (gpio can't double as
+    // the sentinel -- GPIO0 is a valid, already-default pin.)
+    if (output_sps == 0) {
+        printf("Clearing ADC stream settings from flash.\n");
+        esp_err_t err = adc_stream_clear_config();
+        if (err == ESP_OK) {
+            printf("ADC stream settings cleared successfully.\n");
+            printf("New connections will use CONFIG defaults.\n");
+        } else {
+            printf("Error clearing ADC stream settings: %s\n",
+                    esp_err_to_name(err));
+            return 1;
+        }
+        return 0;
+    }
+
+    if (output_sps < 0) {
+        printf("Error: output sample rate must be positive.\n");
+        return 1;
+    }
+    if (averaging < 1 || averaging > 1024 ||
+            (averaging & (averaging - 1)) != 0) {
+        printf("Error: averaging must be a power of 2 between 1 and 1024.\n");
+        return 1;
+    }
+    // Same raw-rate sanity check enforced at connection time in
+    // adc_stream_task() -- fail fast here instead of only at next connect.
+    uint32_t raw_sample_freq_hz = (uint32_t)output_sps * (uint32_t)averaging;
+    if (raw_sample_freq_hz < SOC_ADC_SAMPLE_FREQ_THRES_LOW ||
+            raw_sample_freq_hz > SOC_ADC_SAMPLE_FREQ_THRES_HIGH) {
+        printf("Error: output rate (%d) x averaging (%d) = %" PRIu32
+                " Hz raw ADC rate, outside the supported range (%d - %d "
+                "Hz).\n", output_sps, averaging, raw_sample_freq_hz,
+                SOC_ADC_SAMPLE_FREQ_THRES_LOW, SOC_ADC_SAMPLE_FREQ_THRES_HIGH);
+        return 1;
+    }
+    enum adc_stream_format format;
+    if (!parse_adc_format(format_str, &format)) {
+        printf("Error: format must be 'text' or 'binary16'.\n");
+        return 1;
+    }
+
+    printf("ADC stream settings received:\n");
+    printf("  GPIO: %d\n", gpio);
+    printf("  Output rate: %d Hz\n", output_sps);
+    printf("  Averaging: %d\n", averaging);
+    printf("  Format: %s\n", format_str);
+
+    esp_err_t err = adc_stream_save_config(gpio, output_sps, averaging, format);
+    if (err == ESP_OK) {
+        printf("ADC stream settings saved successfully.\n");
+        printf("New connections will use these settings.\n");
+    } else {
+        printf("Error saving ADC stream settings: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    return 0;
+}
+#endif
+
 static int reboot_cmd_handler(int argc, char **argv)
 {
     printf("Rebooting...\n");
@@ -544,6 +652,10 @@ static int status_cmd_handler(int argc, char **argv)
     defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
     uart_bridge_print_status();
 #endif
+
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    adc_stream_print_status();
+#endif
     return 0;
 }
 
@@ -558,6 +670,10 @@ static int help_cmd_handler(int argc, char **argv)
     defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
     printf("  uart <instance> <baud_rate> <data_bits> <parity> <stop_bits> - "
            "Configure UART bridge settings.\n");
+#endif
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    printf("  adc <gpio> <output_sps> <averaging> <format> - Configure "
+           "ADC streaming settings.\n");
 #endif
     printf("  reboot - Restart the device.\n");
     printf("  status - Report network status.\n");
@@ -668,6 +784,26 @@ static void commands_init(void)
         .argtable = &uart_args
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&uart_cmd));
+#endif
+
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    adc_args.gpio = arg_int1(NULL, NULL, "<gpio>", "ADC1 input GPIO");
+    adc_args.output_sps = arg_int1(NULL, NULL, "<output_sps>",
+            "Output sample rate in Hz (0 clears stored settings)");
+    adc_args.averaging = arg_int1(NULL, NULL, "<averaging>",
+            "Averaging count: power of 2, 1-1024");
+    adc_args.format = arg_str1(NULL, NULL, "<format>",
+            "Output format: text or binary16");
+    adc_args.end = arg_end(4);
+
+    const esp_console_cmd_t adc_cmd = {
+        .command = "adc",
+        .help = "Configure ADC streaming settings",
+        .hint = NULL,
+        .func = &adc_cmd_handler,
+        .argtable = &adc_args
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&adc_cmd));
 #endif
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
@@ -1202,6 +1338,35 @@ static BaseType_t uart_bridge_3_task_start(void)
 }
 #endif
 
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+static BaseType_t adc_stream_task_start(void)
+{
+    static const struct adc_stream_config config = {
+        .port               = CONFIG_ESP_ADC_STREAM_TCP_PORT,
+#ifdef CONFIG_ESP_ADC_STREAM_USE_KEEPALIVE
+        .keepalive_timeout  = CONFIG_ESP_ADC_STREAM_KEEPALIVE_TIMEOUT,
+#else
+        .keepalive_timeout  = 0,
+#endif
+        .gpio               = CONFIG_ESP_ADC_STREAM_GPIO,
+        .sample_rate_hz     = CONFIG_ESP_ADC_STREAM_SAMPLE_RATE_HZ,
+        .averaging_count    = CONFIG_ESP_ADC_STREAM_AVERAGING_COUNT,
+#if defined(CONFIG_ESP_ADC_STREAM_FORMAT_TEXT)
+        .format             = ADC_STREAM_FORMAT_TEXT,
+#elif defined(CONFIG_ESP_ADC_STREAM_FORMAT_BINARY16)
+        .format             = ADC_STREAM_FORMAT_BINARY16,
+#else
+#error "Invalid setting for CONFIG_ESP_ADC_STREAM_FORMAT."
+#endif
+        .correction_curve_x1000000 = CONFIG_ESP_ADC_STREAM_CORRECTION_CURVE_X1000000,
+        .correction_gain_x1000  = CONFIG_ESP_ADC_STREAM_CORRECTION_GAIN_X1000,
+        .correction_offset_mv   = CONFIG_ESP_ADC_STREAM_CORRECTION_OFFSET_MV,
+    };
+
+    return adc_stream_start(&config, "adc_stream_task", NULL);
+}
+#endif
+
 void app_main(void)
 {
     // DAP_Setup() runs in cmsis_dap_tcp_task(), which owns the task-local DAP
@@ -1300,6 +1465,12 @@ void app_main(void)
 #ifdef CONFIG_ESP_UART_BRIDGE_3_ENABLED
     if(uart_bridge_3_task_start() != pdPASS) {
         printf("Failed to start third UART bridge task.\n");
+    }
+#endif
+
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    if(adc_stream_task_start() != pdPASS) {
+        printf("Failed to start ADC stream task.\n");
     }
 #endif
 

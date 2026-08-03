@@ -164,6 +164,15 @@ idf.py fullclean menuconfig build flash
    CMSIS-DAP config → UART Bridge → UART RX → (choose an available GPIO)
    ```
 
+* It is also possible to stream voltage measurements from one ADC channel over
+  another TCP/IP socket. Refer to the ADC streaming page. Sample rate,
+  averaging, and other parameters are configurable in menuconfig and also using
+  the ```adc``` console command.
+
+   ```
+   CMSIS-DAP config → ADC streaming → Enable ADC streaming
+   ```
+
 If you want to use this code as a component in another application see [this
 section](#usage-as-a-component) below.
 
@@ -512,6 +521,16 @@ real    0m19.242s
 user    0m0.052s
 sys     0m0.155s
 ```
+
+## ADC streaming
+
+As a development/debugging aid, live ADC measurements can be streamed and
+plotted using the ```host/adc_stream_plot.py``` script.  Refer to the
+experimental feature ```CONFIG_ESP_ADC_STREAM_ENABLED```. The ESP32 ADCs tend
+to be noisy, so you might want to enable maximum averaging. Here is a plot of
+the ADC reading from a current sense amplifier:
+
+![scopeshot1](img/adc_streaming.png)
 
 # Usage as a component
 

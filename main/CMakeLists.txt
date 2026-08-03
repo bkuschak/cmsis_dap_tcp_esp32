@@ -14,12 +14,17 @@ if(CMAKE_PROJECT_NAME STREQUAL "cmsis_dap_tcp_esp32")
     list(APPEND COMPONENT_SRCS "main.c")
 endif()
 
-set(PRIV_REQUIRES "spi_flash" "esp_driver_gpio")
+set(PRIV_REQUIRES "spi_flash" "esp_driver_gpio" "esp_adc")
 
 if(CONFIG_ESP_UART_BRIDGE_1_ENABLED OR
    CONFIG_ESP_UART_BRIDGE_2_ENABLED OR
    CONFIG_ESP_UART_BRIDGE_3_ENABLED)
     list(APPEND COMPONENT_SRCS "uart_bridge.c")
+endif()
+
+if(CONFIG_ESP_ADC_STREAM_ENABLED)
+    list(APPEND COMPONENT_SRCS "adc_stream.c")
+    list(APPEND PRIV_REQUIRES "esp_adc")
 endif()
 
 if(CONFIG_ESP_PRINT_CPU_USAGE)
