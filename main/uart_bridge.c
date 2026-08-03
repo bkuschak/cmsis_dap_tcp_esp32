@@ -37,6 +37,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "netdb.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/fcntl.h>
@@ -47,6 +49,15 @@
 
 #define BUFFER_SIZE         512
 #define UART_BUFFER_SIZE    512
+
+// Runtime-configurable UART line settings, persisted per UART number so
+// that they survive a reboot. Namespace name is derived from the UART
+// number to keep multiple simultaneous bridge instances independent.
+#define UART_CONFIG_NVS_NAMESPACE_FMT   "uart_cfg%d"
+#define UART_CONFIG_NVS_KEY_BAUD_RATE   "baud_rate"
+#define UART_CONFIG_NVS_KEY_DATA_BITS   "data_bits"
+#define UART_CONFIG_NVS_KEY_PARITY      "parity"
+#define UART_CONFIG_NVS_KEY_STOP_BITS   "stop_bits"
 
 #define UART_BRIDGE_TASK_STACK_SIZE     4096
 #define UART_BRIDGE_TASK_PRIORITY       5
@@ -108,6 +119,149 @@ static void release_resources(int slot)
     portENTER_CRITICAL(&task_states_mux);
     task_states[slot] = NULL;
     portEXIT_CRITICAL(&task_states_mux);
+}
+
+esp_err_t uart_bridge_save_config(int uart_num, int baud_rate,
+        uart_word_length_t data_bits, uart_parity_t parity,
+        uart_stop_bits_t stop_bits)
+{
+    char ns[16];
+    snprintf(ns, sizeof(ns), UART_CONFIG_NVS_NAMESPACE_FMT, uart_num);
+
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(ns, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK)
+        return err;
+
+    err = nvs_set_i32(nvs_handle, UART_CONFIG_NVS_KEY_BAUD_RATE, baud_rate);
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs_handle, UART_CONFIG_NVS_KEY_DATA_BITS,
+                (uint8_t)data_bits);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs_handle, UART_CONFIG_NVS_KEY_PARITY,
+                (uint8_t)parity);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs_handle, UART_CONFIG_NVS_KEY_STOP_BITS,
+                (uint8_t)stop_bits);
+    }
+    if (err == ESP_OK)
+        err = nvs_commit(nvs_handle);
+
+    nvs_close(nvs_handle);
+    return err;
+}
+
+esp_err_t uart_bridge_clear_config(int uart_num)
+{
+    char ns[16];
+    snprintf(ns, sizeof(ns), UART_CONFIG_NVS_NAMESPACE_FMT, uart_num);
+
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(ns, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK)
+        return err;
+
+    // Erase the entire namespace to clear all stored UART settings.
+    err = nvs_erase_all(nvs_handle);
+    if (err == ESP_OK)
+        err = nvs_commit(nvs_handle);
+
+    nvs_close(nvs_handle);
+    return err;
+}
+
+// Read persisted UART line settings for uart_num. Returns true and fills in
+// the output parameters if all settings were found in flash, false
+// otherwise (caller should fall back to its own defaults).
+static bool load_uart_config(int uart_num, int *baud_rate,
+        uart_word_length_t *data_bits, uart_parity_t *parity,
+        uart_stop_bits_t *stop_bits)
+{
+    char ns[16];
+    snprintf(ns, sizeof(ns), UART_CONFIG_NVS_NAMESPACE_FMT, uart_num);
+
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(ns, NVS_READONLY, &nvs_handle);
+    if (err != ESP_OK)
+        return false;
+
+    int32_t baud = 0;
+    uint8_t dbits = 0;
+    uint8_t par = 0;
+    uint8_t sbits = 0;
+
+    err = nvs_get_i32(nvs_handle, UART_CONFIG_NVS_KEY_BAUD_RATE, &baud);
+    if (err == ESP_OK) {
+        err = nvs_get_u8(nvs_handle, UART_CONFIG_NVS_KEY_DATA_BITS, &dbits);
+    }
+    if (err == ESP_OK) {
+        err = nvs_get_u8(nvs_handle, UART_CONFIG_NVS_KEY_PARITY, &par);
+    }
+    if (err == ESP_OK) {
+        err = nvs_get_u8(nvs_handle, UART_CONFIG_NVS_KEY_STOP_BITS, &sbits);
+    }
+    nvs_close(nvs_handle);
+    if (err != ESP_OK)
+        return false;
+
+    *baud_rate = baud;
+    *data_bits = (uart_word_length_t)dbits;
+    *parity = (uart_parity_t)par;
+    *stop_bits = (uart_stop_bits_t)sbits;
+    return true;
+}
+
+// Apply the effective UART line settings: settings stored in flash take
+// precedence, falling back to the CONFIG-derived defaults in *config.
+// Called at task startup and again on every new TCP client connection, so
+// that a runtime settings change (via the 'uart' console command) takes
+// effect for the next connection without requiring a reboot.
+static const char* parity_str(uart_parity_t parity)
+{
+    switch (parity) {
+        case UART_PARITY_EVEN: return "even";
+        case UART_PARITY_ODD:  return "odd";
+        default:               return "none";
+    }
+}
+
+static void apply_uart_config(const struct uart_bridge_config *config)
+{
+    int baud_rate = config->baud_rate;
+    uart_word_length_t data_bits = config->data_bits;
+    uart_parity_t parity = config->parity;
+    uart_stop_bits_t stop_bits = config->stop_bits;
+
+    if (load_uart_config(config->uart_num, &baud_rate, &data_bits, &parity,
+                &stop_bits)) {
+        fprintf(stdout, "UART%d bridge: using UART settings from flash: "
+                "%d baud, %d data bits, %s parity, %d stop bits.\n",
+                config->uart_num, baud_rate,
+                data_bits == UART_DATA_7_BITS ? 7 : 8, parity_str(parity),
+                stop_bits == UART_STOP_BITS_2 ? 2 : 1);
+    } else {
+        baud_rate = config->baud_rate;
+        data_bits = config->data_bits;
+        parity = config->parity;
+        stop_bits = config->stop_bits;
+        fprintf(stdout, "UART%d bridge: using UART settings from CONFIG: "
+                "%d baud, %d data bits, %s parity, %d stop bits.\n",
+                config->uart_num, baud_rate,
+                data_bits == UART_DATA_7_BITS ? 7 : 8, parity_str(parity),
+                stop_bits == UART_STOP_BITS_2 ? 2 : 1);
+    }
+
+    uart_config_t uart_config = {
+        .baud_rate  = baud_rate,
+        .data_bits  = data_bits,
+        .parity     = parity,
+        .stop_bits  = stop_bits,
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    ESP_ERROR_CHECK(uart_param_config(config->uart_num, &uart_config));
 }
 
 void uart_bridge_print_status(void)
@@ -231,16 +385,7 @@ static void uart_bridge_task(void* arg)
     }
     uart_vfs_dev_register();
 
-    uart_config_t uart_config = {
-        .baud_rate  = config.baud_rate,
-        .data_bits  = config.data_bits,
-        .parity     = config.parity,
-        .stop_bits  = config.stop_bits,
-        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-    ESP_ERROR_CHECK(uart_param_config(config.uart_num,
-                &uart_config));
+    apply_uart_config(&config);
 
     if(config.txd_pin != UART_PIN_NO_CHANGE ||
        config.rxd_pin != UART_PIN_NO_CHANGE) {
@@ -333,6 +478,11 @@ static void uart_bridge_task(void* arg)
                     setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPCNT, &val,
                             sizeof(val));
                     }
+
+                    // Reapply UART settings now, in case they were changed
+                    // via the console since the last connection (or since
+                    // boot).
+                    apply_uart_config(&config);
 
                     // Open UART.
                     uart_fd = open(uart_addr, O_RDWR);

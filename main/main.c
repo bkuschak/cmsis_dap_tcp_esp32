@@ -42,6 +42,7 @@
  *     esp-idf/examples/wifi/getting_started/station
  */
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
@@ -322,6 +323,103 @@ static int wifi_cmd_handler(int argc, char **argv)
     return 0;
 }
 
+#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+// UART command argument structure.
+static struct {
+    struct arg_int *baud_rate;
+    struct arg_int *data_bits;
+    struct arg_str *parity;
+    struct arg_int *stop_bits;
+    struct arg_end *end;
+} uart_args;
+
+static bool parse_uart_parity(const char* parity_str, uart_parity_t* out)
+{
+    if (strlen(parity_str) != 1)
+        return false;
+
+    switch (toupper((unsigned char)parity_str[0])) {
+        case 'N': *out = UART_PARITY_DISABLE; break;
+        case 'E': *out = UART_PARITY_EVEN;    break;
+        case 'O': *out = UART_PARITY_ODD;     break;
+        default:  return false;
+    }
+    return true;
+}
+
+static int uart_cmd_handler(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &uart_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, uart_args.end, argv[0]);
+        printf("Usage: uart <baud_rate> <data_bits> <parity> <stop_bits>\n");
+        printf("  data_bits: 7 or 8\n");
+        printf("  parity: n (none), e (even), o (odd) -- case-insensitive\n");
+        printf("  stop_bits: 1 or 2\n");
+        printf("  Use baud_rate 0 to clear stored settings and revert to "
+                "CONFIG defaults.\n");
+        return 1;
+    }
+
+    int baud_rate = uart_args.baud_rate->ival[0];
+    int data_bits = uart_args.data_bits->ival[0];
+    const char* parity_str = uart_args.parity->sval[0];
+    int stop_bits = uart_args.stop_bits->ival[0];
+
+    // A baud rate of 0 clears the stored settings.
+    if (baud_rate == 0) {
+        printf("Clearing UART settings from flash.\n");
+        esp_err_t err = uart_bridge_clear_config(CONFIG_ESP_UART_BRIDGE_UART_NUM);
+        if (err == ESP_OK) {
+            printf("UART settings cleared successfully.\n");
+            printf("New connections will use CONFIG defaults.\n");
+        } else {
+            printf("Error clearing UART settings: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        return 0;
+    }
+
+    if (baud_rate < 0) {
+        printf("Error: baud rate must be positive.\n");
+        return 1;
+    }
+    if (data_bits != 7 && data_bits != 8) {
+        printf("Error: data bits must be 7 or 8.\n");
+        return 1;
+    }
+    uart_parity_t parity;
+    if (!parse_uart_parity(parity_str, &parity)) {
+        printf("Error: parity must be n, e, or o.\n");
+        return 1;
+    }
+    if (stop_bits != 1 && stop_bits != 2) {
+        printf("Error: stop bits must be 1 or 2.\n");
+        return 1;
+    }
+
+    printf("UART settings received:\n");
+    printf("  Baud rate: %d\n", baud_rate);
+    printf("  Data bits: %d\n", data_bits);
+    printf("  Parity: %s\n", parity_str);
+    printf("  Stop bits: %d\n", stop_bits);
+
+    esp_err_t err = uart_bridge_save_config(CONFIG_ESP_UART_BRIDGE_UART_NUM,
+            baud_rate,
+            data_bits == 7 ? UART_DATA_7_BITS : UART_DATA_8_BITS,
+            parity,
+            stop_bits == 2 ? UART_STOP_BITS_2 : UART_STOP_BITS_1);
+    if (err == ESP_OK) {
+        printf("UART settings saved successfully.\n");
+        printf("New connections will use these settings.\n");
+    } else {
+        printf("Error saving UART settings: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    return 0;
+}
+#endif
+
 static int reboot_cmd_handler(int argc, char **argv)
 {
     printf("Rebooting...\n");
@@ -406,6 +504,10 @@ static int help_cmd_handler(int argc, char **argv)
     printf("  help - Show this help message.\n");
     printf("  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure WiFi "
            "credentials.\n");
+#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+    printf("  uart <baud_rate> <data_bits> <parity> <stop_bits> - Configure "
+           "UART bridge settings.\n");
+#endif
     printf("  reboot - Restart the device.\n");
     printf("  status - Report network status.\n");
     return 0;
@@ -484,6 +586,28 @@ static void commands_init(void)
     };
     printf("Enabling console commands.\n");
     ESP_ERROR_CHECK(esp_console_cmd_register(&wifi_cmd));
+
+#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+    uart_args.baud_rate = arg_int1(NULL, NULL, "<baud_rate>",
+            "UART baud rate (0 clears stored settings)");
+    uart_args.data_bits = arg_int1(NULL, NULL, "<data_bits>",
+            "Data bits: 7 or 8");
+    uart_args.parity = arg_str1(NULL, NULL, "<parity>",
+            "Parity: n, e, o (case-insensitive)");
+    uart_args.stop_bits = arg_int1(NULL, NULL, "<stop_bits>",
+            "Stop bits: 1 or 2");
+    uart_args.end = arg_end(4);
+
+    const esp_console_cmd_t uart_cmd = {
+        .command = "uart",
+        .help = "Configure UART bridge settings",
+        .hint = NULL,
+        .func = &uart_cmd_handler,
+        .argtable = &uart_args
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&uart_cmd));
+#endif
+
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
 #endif
