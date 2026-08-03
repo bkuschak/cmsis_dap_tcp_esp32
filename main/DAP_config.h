@@ -75,6 +75,12 @@
 
 #define GPIO_PIN_VALID(pin)     ((pin) >= 0)
 
+// Drive strength (gpio_drive_cap_t, 0-3) applied uniformly to all SWD/JTAG
+// output pins. See CONFIG_ESP_DAP_DRIVE_STRENGTH. Masked to 2 bits since the
+// Kconfig choice constrains it to 0-3 but the underlying int has no `range`,
+// so a hand-edited sdkconfig could otherwise pass an out-of-range value.
+#define GPIO_DRIVE_STRENGTH     ((gpio_drive_cap_t)(cmsis_dap_gpio_config->drive_strength & 0x3))
+
 /**************************************************************************************************
 \defgroup DAP_Config_Debug_gr CMSIS-DAP Debug Unit Information
 \ingroup DAP_ConfigIO_gr
@@ -418,21 +424,22 @@ __STATIC_INLINE void PORT_JTAG_SETUP (void)
     gpio_set_direction(GPIO_TDI, GPIO_MODE_OUTPUT);
     gpio_set_direction(GPIO_TDO, GPIO_MODE_INPUT);
 
-    // Set weakest drive strength to improve signal integrity.
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_CAP_0);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_CAP_0);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_TDI, GPIO_DRIVE_CAP_0);
+    // Configurable drive strength to trade off signal integrity vs. edge
+    // rate; see CONFIG_ESP_DAP_DRIVE_STRENGTH.
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_STRENGTH);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_STRENGTH);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_TDI, GPIO_DRIVE_STRENGTH);
 #endif
 
 #ifdef GPIO_NTRST
     if (GPIO_PIN_VALID(GPIO_NTRST))
         gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NTRST,
-                GPIO_DRIVE_CAP_0);
+                GPIO_DRIVE_STRENGTH);
 #endif
 #ifdef GPIO_NRESET
     if (GPIO_PIN_VALID(GPIO_NRESET))
         gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET,
-                GPIO_DRIVE_CAP_0);
+                GPIO_DRIVE_STRENGTH);
 #endif
 
 #ifdef GPIO_NTRST
@@ -469,9 +476,10 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
     gpio_set_level(GPIO_SWDIO_TMS, 0);
     gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_OUTPUT);
 
-    // Set weakest drive strength to improve signal integrity.
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_CAP_0);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_CAP_0);
+    // Configurable drive strength to trade off signal integrity vs. edge
+    // rate; see CONFIG_ESP_DAP_DRIVE_STRENGTH.
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_STRENGTH);
+    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_STRENGTH);
 #endif
 
 #ifdef GPIO_TDI
@@ -489,7 +497,7 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
         gpio_pullup_en(GPIO_NRESET);
         gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
         gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET,
-                GPIO_DRIVE_CAP_0);
+                GPIO_DRIVE_STRENGTH);
     }
 #endif
 }

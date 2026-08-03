@@ -693,6 +693,7 @@ static BaseType_t cmsis_dap_tcp_task_start(void)
 #endif
             .io_port_write_cycles = CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES,
             .delay_slow_cycles = CONFIG_ESP_DAP_DELAY_SLOW_CYCLES,
+            .drive_strength = CONFIG_ESP_DAP_DRIVE_STRENGTH,
         },
     };
 

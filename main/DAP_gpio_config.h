@@ -17,6 +17,7 @@ struct cmsis_dap_gpio_config {
     int led_active_high;
     int io_port_write_cycles;
     int delay_slow_cycles;
+    int drive_strength;
 };
 
 extern __thread const struct cmsis_dap_gpio_config *cmsis_dap_gpio_config;
