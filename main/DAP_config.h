@@ -776,12 +776,15 @@ It is recommended to provide the following LEDs for status indication:
 __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit)
 {
 #if CONFIG_ESP_DAP_LED_RGB
+    if (!GPIO_PIN_VALID(GPIO_LED))
+        return;
+
     if(bit & 1)
-        set_rgb_led(CONFIG_ESP_DAP_LED_RGB_INTENSITY_R,
+        set_rgb_led(GPIO_LED, CONFIG_ESP_DAP_LED_RGB_INTENSITY_R,
                     CONFIG_ESP_DAP_LED_RGB_INTENSITY_G,
                     CONFIG_ESP_DAP_LED_RGB_INTENSITY_B);
     else
-        set_rgb_led(0, 0, 0);
+        set_rgb_led(GPIO_LED, 0, 0, 0);
 #elif defined(CONFIG_ESP_DAP_LED_STANDARD)
     if (!GPIO_PIN_VALID(GPIO_LED))
         return;
@@ -869,7 +872,8 @@ __STATIC_INLINE void DAP_SETUP (void)
         gpio_reset_pin(GPIO_LED);
 #endif
 #ifdef CONFIG_ESP_DAP_LED_RGB
-    set_rgb_led(0, 0, 0);
+    if (GPIO_PIN_VALID(GPIO_LED))
+        set_rgb_led(GPIO_LED, 0, 0, 0);
 #elif defined(CONFIG_ESP_DAP_LED_STANDARD)
     if (GPIO_PIN_VALID(GPIO_LED)) {
         gpio_set_level(GPIO_LED, GPIO_LED_ACTIVE_HIGH ? 0 : 1);
