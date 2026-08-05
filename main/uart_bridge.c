@@ -20,11 +20,11 @@
  * The standalone app default is fixed at build time and can be adjusted by
  * these menuconfig options:
  *
- *     CONFIG_ESP_UART_BRIDGE_UART_NUM
- *     CONFIG_ESP_UART_BRIDGE_BAUD_RATE
- *     CONFIG_ESP_UART_BRIDGE_DATA_BITS
- *     CONFIG_ESP_UART_BRIDGE_PARITY
- *     CONFIG_ESP_UART_BRIDGE_STOP_BITS
+ *     CONFIG_ESP_UART_BRIDGE_1_UART_NUM
+ *     CONFIG_ESP_UART_BRIDGE_1_BAUD_RATE
+ *     CONFIG_ESP_UART_BRIDGE_1_DATA_BITS
+ *     CONFIG_ESP_UART_BRIDGE_1_PARITY
+ *     CONFIG_ESP_UART_BRIDGE_1_STOP_BITS
  *
  * This code supports multiple UART bridges operating simultaneously on
  * different TCP/IP ports, if the hardware has enough available UARTs.
@@ -88,6 +88,8 @@ struct uart_bridge_state {
 // use) and for uart_bridge_print_status() to enumerate active instances.
 static struct uart_bridge_state *task_states[UART_BRIDGE_MAX_TASKS];
 static portMUX_TYPE task_states_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static __thread struct uart_bridge_state *task_state;
 
 static int reserve_resources(struct uart_bridge_state *state)
 {
@@ -153,6 +155,21 @@ esp_err_t uart_bridge_save_config(int uart_num, int baud_rate,
     return err;
 }
 
+esp_err_t uart_bridge_apply_live_config(int uart_num, int baud_rate,
+        uart_word_length_t data_bits, uart_parity_t parity,
+        uart_stop_bits_t stop_bits)
+{
+    uart_config_t uart_config = {
+        .baud_rate  = baud_rate,
+        .data_bits  = data_bits,
+        .parity     = parity,
+        .stop_bits  = stop_bits,
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    return uart_param_config(uart_num, &uart_config);
+}
+
 esp_err_t uart_bridge_clear_config(int uart_num)
 {
     char ns[16];
@@ -213,20 +230,20 @@ static bool load_uart_config(int uart_num, int *baud_rate,
     return true;
 }
 
+static const char* parity_str(uart_parity_t parity)
+{
+    switch (parity) {
+        case UART_PARITY_EVEN: return "E";
+        case UART_PARITY_ODD:  return "O";
+        default:               return "N";
+    }
+}
+
 // Apply the effective UART line settings: settings stored in flash take
 // precedence, falling back to the CONFIG-derived defaults in *config.
 // Called at task startup and again on every new TCP client connection, so
 // that a runtime settings change (via the 'uart' console command) takes
 // effect for the next connection without requiring a reboot.
-static const char* parity_str(uart_parity_t parity)
-{
-    switch (parity) {
-        case UART_PARITY_EVEN: return "even";
-        case UART_PARITY_ODD:  return "odd";
-        default:               return "none";
-    }
-}
-
 static void apply_uart_config(const struct uart_bridge_config *config)
 {
     int baud_rate = config->baud_rate;
@@ -236,9 +253,9 @@ static void apply_uart_config(const struct uart_bridge_config *config)
 
     if (load_uart_config(config->uart_num, &baud_rate, &data_bits, &parity,
                 &stop_bits)) {
-        fprintf(stdout, "UART%d bridge: using UART settings from flash: "
-                "%d baud, %d data bits, %s parity, %d stop bits.\n",
-                config->uart_num, baud_rate,
+        fprintf(stdout, "UART bridge %d: using UART%d settings from flash: "
+                "%d-%d-%s-%d\n",
+                task_state->config->instance, config->uart_num, baud_rate,
                 data_bits == UART_DATA_7_BITS ? 7 : 8, parity_str(parity),
                 stop_bits == UART_STOP_BITS_2 ? 2 : 1);
     } else {
@@ -246,9 +263,9 @@ static void apply_uart_config(const struct uart_bridge_config *config)
         data_bits = config->data_bits;
         parity = config->parity;
         stop_bits = config->stop_bits;
-        fprintf(stdout, "UART%d bridge: using UART settings from CONFIG: "
-                "%d baud, %d data bits, %s parity, %d stop bits.\n",
-                config->uart_num, baud_rate,
+        fprintf(stdout, "UART bridge %d: using UART%d settings from CONFIG: "
+                "%d-%d-%s-%d\n",
+                task_state->config->instance, config->uart_num, baud_rate,
                 data_bits == UART_DATA_7_BITS ? 7 : 8, parity_str(parity),
                 stop_bits == UART_STOP_BITS_2 ? 2 : 1);
     }
@@ -269,6 +286,7 @@ void uart_bridge_print_status(void)
     struct {
         bool active;
         bool client_connected;
+        int instance;
         int txd_pin;
         int rxd_pin;
         int port;
@@ -277,6 +295,7 @@ void uart_bridge_print_status(void)
         char client_ip_str[INET_ADDRSTRLEN];
         unsigned long count_rx;
         unsigned long count_tx;
+        const struct uart_bridge_config *config;
     } snapshot[UART_BRIDGE_MAX_TASKS] = {0};
 
     // Snapshot under the lock, then print afterward -- printf() is too slow
@@ -288,6 +307,7 @@ void uart_bridge_print_status(void)
             continue;
         snapshot[i].active = true;
         snapshot[i].client_connected = state->client_connected;
+        snapshot[i].instance = state->config->instance;
         snapshot[i].txd_pin = state->config->txd_pin;
         snapshot[i].rxd_pin = state->config->rxd_pin;
         snapshot[i].port = state->config->port;
@@ -297,6 +317,7 @@ void uart_bridge_print_status(void)
         snapshot[i].count_tx = state->count_tx;
         memcpy(snapshot[i].client_ip_str, state->client_ip_str,
                 sizeof(snapshot[i].client_ip_str));
+        snapshot[i].config = state->config;
     }
     portEXIT_CRITICAL(&task_states_mux);
 
@@ -305,18 +326,35 @@ void uart_bridge_print_status(void)
         if (!snapshot[i].active)
             continue;
         any = true;
+
+        // Effective settings: same flash-with-CONFIG-fallback logic as
+        // apply_uart_config(), computed fresh.
+        int baud_rate = snapshot[i].config->baud_rate;
+        uart_word_length_t data_bits_raw = snapshot[i].config->data_bits;
+        uart_parity_t parity = snapshot[i].config->parity;
+        uart_stop_bits_t stop_bits_raw = snapshot[i].config->stop_bits;
+        load_uart_config(snapshot[i].uart_num, &baud_rate, &data_bits_raw,
+                &parity, &stop_bits_raw);
+        int data_bits = data_bits_raw == UART_DATA_7_BITS ? 7 : 8;
+        int stop_bits = stop_bits_raw == UART_STOP_BITS_2 ? 2 : 1;
         if (snapshot[i].client_connected) {
-            fprintf(stdout, "UART%d bridge: port %d connected to '%s:%d'. "
-                    "GPIOs: TX=%d RX=%d. Bytes: TX=%lu RX=%lu.\n",
-                    snapshot[i].uart_num, snapshot[i].port,
+            fprintf(stdout, "UART bridge %d: UART%d, port %d connected to "
+                    "'%s:%d'. GPIOs: TX=%d RX=%d. Bytes: TX=%lu RX=%lu. "
+                    "%d-%d-%s-%d\n",
+                    snapshot[i].instance, snapshot[i].uart_num, snapshot[i].port,
                     snapshot[i].client_ip_str, snapshot[i].client_port,
                     snapshot[i].txd_pin, snapshot[i].rxd_pin,
-                    snapshot[i].count_tx, snapshot[i].count_rx);
+                    snapshot[i].count_tx, snapshot[i].count_rx,
+                    baud_rate, data_bits,
+                    parity_str(parity), stop_bits);
         } else {
-            fprintf(stdout, "UART%d bridge: Listening on port %d. GPIOs: TX=%d"
-                    " RX=%d.\n",
-                    snapshot[i].uart_num, snapshot[i].port,
-                    snapshot[i].txd_pin, snapshot[i].rxd_pin);
+            fprintf(stdout, "UART bridge %d: UART%d, listening on port %d. "
+                    "GPIOs: TX=%d RX=%d. "
+                    "%d-%d-%s-%d\n",
+                    snapshot[i].instance, snapshot[i].uart_num, snapshot[i].port,
+                    snapshot[i].txd_pin, snapshot[i].rxd_pin,
+                    baud_rate, data_bits,
+                    parity_str(parity), stop_bits);
         }
     }
     if (!any)
@@ -328,20 +366,21 @@ static void uart_bridge_task(void* arg)
     struct uart_bridge_config config = *(struct uart_bridge_config*)arg;
     struct uart_bridge_state state = {0};
     state.config = &config;
+    task_state = &state;
     int ret;
 
     int slot = reserve_resources(&state);
     if (slot < 0) {
-        fprintf(stderr, "UART%d bridge: resource conflict on port or UART.\n",
-                config.uart_num);
+        fprintf(stderr, "UART bridge %d: resource conflict on port or "
+                "UART%d.\n", task_state->config->instance, config.uart_num);
         vTaskDelete(NULL);
         return;
     }
 
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listen_fd < 0) {
-        fprintf(stderr, "UART%d bridge: Failed to create socket: %s\n",
-                config.uart_num, strerror(errno));
+        fprintf(stderr, "UART bridge %d: Failed to create socket: %s\n",
+                task_state->config->instance, strerror(errno));
         release_resources(slot);
         vTaskDelete(NULL);
         return;
@@ -358,16 +397,16 @@ static void uart_bridge_task(void* arg)
     server_addr.sin_port = htons(config.port);
     ret = bind(listen_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
     if(ret < 0) {
-        fprintf(stderr, "UART%d bridge: failed to bind socket: %s\n",
-                config.uart_num, strerror(errno));
+        fprintf(stderr, "UART bridge %d: failed to bind socket: %s\n",
+                task_state->config->instance, strerror(errno));
         release_resources(slot);
         vTaskDelete(NULL);
         return;
     }
     ret = listen(listen_fd, 1);
     if(ret < 0) {
-        fprintf(stderr, "UART%d bridge: failed to listen on socket: %s\n",
-                config.uart_num, strerror(errno));
+        fprintf(stderr, "UART bridge %d: failed to listen on socket: %s\n",
+                task_state->config->instance, strerror(errno));
         release_resources(slot);
         vTaskDelete(NULL);
         return;
@@ -377,8 +416,8 @@ static void uart_bridge_task(void* arg)
     ret = uart_driver_install(config.uart_num,
             UART_BUFFER_SIZE, UART_BUFFER_SIZE, 0, NULL, 0);
     if(ret != ESP_OK) {
-        fprintf(stderr, "UART%d bridge: UART driver installation failed\n",
-                config.uart_num);
+        fprintf(stderr, "UART bridge %d: UART%d driver installation "
+                "failed\n", task_state->config->instance, config.uart_num);
         release_resources(slot);
         vTaskDelete(NULL);
         return;
@@ -389,9 +428,6 @@ static void uart_bridge_task(void* arg)
 
     if(config.txd_pin != UART_PIN_NO_CHANGE ||
        config.rxd_pin != UART_PIN_NO_CHANGE) {
-        fprintf(stderr, "UART%d bridge: GPIOs: TX=%d RX=%d.\n",
-                config.uart_num, config.txd_pin,
-                config.rxd_pin);
 
         // Disable any GPIO output drive on these pins before handing them
         // to the UART peripheral.
@@ -410,8 +446,9 @@ static void uart_bridge_task(void* arg)
     char uart_addr[32];
     snprintf(uart_addr, sizeof(uart_addr), "/dev/uart/%d", config.uart_num);
 
-    fprintf(stdout, "UART%d bridge: listening on port %d.\n",
-            config.uart_num, config.port);
+    fprintf(stdout, "UART bridge %d: UART%d, listening on port %d. GPIOs: "
+            "TX=%d RX=%d\n", task_state->config->instance, config.uart_num,
+            config.port, config.txd_pin, config.rxd_pin);
 
     // Select() loop blocks until activity on sockets or UART.
     struct sockaddr_in client_addr;
@@ -433,8 +470,8 @@ static void uart_bridge_task(void* arg)
         int activity = select(max_fd+1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
             //ESP_LOGE(TAG, "select failed: errno %d", errno);
-            fprintf(stderr, "UART%d bridge: select error: %s\n",
-                    config.uart_num, strerror(errno));
+            fprintf(stderr, "UART bridge %d: select error: %s\n",
+                    task_state->config->instance, strerror(errno));
             break;
         }
 
@@ -446,8 +483,8 @@ static void uart_bridge_task(void* arg)
             if(new_fd < 0) {
                 if(errno != EAGAIN && errno != EWOULDBLOCK) {
                     // Just ignore error for now.
-                    fprintf(stderr, "UART%d bridge: accept error: %s\n",
-                            config.uart_num, strerror(errno));
+                    fprintf(stderr, "UART bridge %d: accept error: %s\n",
+                            task_state->config->instance, strerror(errno));
                 }
             }
             else {
@@ -458,9 +495,9 @@ static void uart_bridge_task(void* arg)
                     inet_ntop(AF_INET, &client_addr.sin_addr, state.client_ip_str,
                             sizeof(state.client_ip_str));
                     state.client_port = ntohs(client_addr.sin_port);
-                    fprintf(stdout, "UART%d bridge: client connected %s:%d\n",
-                            config.uart_num, state.client_ip_str,
-                            state.client_port);
+                    fprintf(stdout, "UART bridge %d: client connected %s:%d\n",
+                            task_state->config->instance,
+                            state.client_ip_str, state.client_port);
 
                     if(config.keepalive_timeout > 0) {
                     // Use TCP keepalives to detect dead clients.
@@ -487,7 +524,8 @@ static void uart_bridge_task(void* arg)
                     // Open UART.
                     uart_fd = open(uart_addr, O_RDWR);
                     if(uart_fd < 0) {
-                        fprintf(stderr, "UART%d bridge: failed opening UART: %s\n",
+                        fprintf(stderr, "UART bridge %d: failed opening "
+                                "UART%d: %s\n", task_state->config->instance,
                                 config.uart_num, strerror(errno));
                         close(client_fd);
                         client_fd = -1;
@@ -504,9 +542,9 @@ static void uart_bridge_task(void* arg)
                     continue;
                 }
                 else {
-                    fprintf(stderr, "UART%d bridge: dropping new connection. "
+                    fprintf(stderr, "UART bridge %d: dropping new connection. "
                             "Another client is already connected.\n",
-                            config.uart_num);
+                            task_state->config->instance);
                     close(new_fd);
                 }
             }
@@ -518,8 +556,8 @@ static void uart_bridge_task(void* arg)
             if(ret == 0 ||
               (ret < 0 && (errno == ECONNABORTED || errno == ENOTCONN))) {
                 // Client has disconnected.
-                fprintf(stdout, "UART%d bridge: client disconnected.\n",
-                        config.uart_num);
+                fprintf(stdout, "UART bridge %d: client disconnected.\n",
+                        task_state->config->instance);
                 close(client_fd);
                 close(uart_fd);
                 client_fd = -1;
@@ -531,8 +569,8 @@ static void uart_bridge_task(void* arg)
             }
             else if(ret < 0) {
                 if(errno != EAGAIN && errno != EWOULDBLOCK)
-                    fprintf(stderr, "UART%d bridge: socket read error: %s\n",
-                            config.uart_num, strerror(errno));
+                    fprintf(stderr, "UART bridge %d: socket read error: %s\n",
+                            task_state->config->instance, strerror(errno));
             }
             else {
                 write(uart_fd, state.buffer, ret);
@@ -545,7 +583,8 @@ static void uart_bridge_task(void* arg)
             ret = read(uart_fd, state.buffer, sizeof(state.buffer)-1);
             if(ret <= 0) {
                 if(errno != EAGAIN && errno != EWOULDBLOCK)
-                    fprintf(stderr, "UART%d bridge: UART read error: %s\n",
+                    fprintf(stderr, "UART bridge %d: UART%d read error: "
+                            "%s\n", task_state->config->instance,
                             config.uart_num, strerror(errno));
             }
             else {
@@ -555,7 +594,8 @@ static void uart_bridge_task(void* arg)
         }
     }
 
-    fprintf(stdout, "UART%d bridge: shutting down.\n", config.uart_num);
+    fprintf(stdout, "UART bridge %d: shutting down.\n",
+            task_state->config->instance);
     state.client_connected = false;
     state.count_rx = 0;
     state.count_tx = 0;

@@ -9,6 +9,7 @@ extern "C" {
 #include "esp_err.h"
 
 struct uart_bridge_config {
+    int instance; // Used for identification in log messages only.
     int port;
     int keepalive_timeout;
     int uart_num;
@@ -28,7 +29,19 @@ void uart_bridge_print_status(void);
 
 // Persist UART line settings to flash for the given UART number. Applied to
 // new TCP client connections; does not affect an already-open connection.
+// Call uart_bridge_apply_live_config() too if the change should also take
+// effect immediately.
 esp_err_t uart_bridge_save_config(int uart_num, int baud_rate,
+        uart_word_length_t data_bits, uart_parity_t parity,
+        uart_stop_bits_t stop_bits);
+
+// Apply UART line settings to the running peripheral immediately, including
+// while a client is already connected. Safe to call from any task once
+// that UART's driver is installed (i.e. once its bridge task has started).
+// Does not persist anything -- pair with uart_bridge_save_config() if the
+// change should also survive a reboot. Bytes in flight at the moment of
+// the change may be garbled, same as changing settings on real hardware.
+esp_err_t uart_bridge_apply_live_config(int uart_num, int baud_rate,
         uart_word_length_t data_bits, uart_parity_t parity,
         uart_stop_bits_t stop_bits);
 

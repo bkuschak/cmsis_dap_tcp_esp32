@@ -48,37 +48,21 @@
 #include <string.h>
 #include "DAP_gpio_config.h"
 
-// Values come from cmsis_dap_gpio_config, the running task's per-instance
-// GPIO config (populated from sdkconfig by main.c at task-start time).
-#if defined(CONFIG_ESP_DAP_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_SWD_SUPPORTED)
+// cmsis_dap_gpio_config is a thread-local variable. GPIOs are configured as -1
+// when unused.
 #define GPIO_SWCLK_TCK          (cmsis_dap_gpio_config->swclk_tck)
 #define GPIO_SWDIO_TMS          (cmsis_dap_gpio_config->swdio_tms)
-#endif
-
-#ifdef CONFIG_ESP_DAP_JTAG_SUPPORTED
 #define GPIO_TDI                (cmsis_dap_gpio_config->tdi)
 #define GPIO_TDO                (cmsis_dap_gpio_config->tdo)
-#endif
-
-#ifdef CONFIG_ESP_DAP_JTAG_NTRST_SUPPORTED
 #define GPIO_NTRST              (cmsis_dap_gpio_config->ntrst)
-#endif
-
-#ifdef CONFIG_ESP_DAP_NRESET_SUPPORTED
 #define GPIO_NRESET             (cmsis_dap_gpio_config->nreset)
-#endif
-
-#if defined(CONFIG_ESP_DAP_LED_STANDARD) || defined(CONFIG_ESP_DAP_LED_RGB)
 #define GPIO_LED                (cmsis_dap_gpio_config->led)
 #define GPIO_LED_ACTIVE_HIGH    (cmsis_dap_gpio_config->led_active_high)
-#endif
 
 #define GPIO_PIN_VALID(pin)     ((pin) >= 0)
 
 // Drive strength (gpio_drive_cap_t, 0-3) applied uniformly to all SWD/JTAG
-// output pins. See CONFIG_ESP_DAP_DRIVE_STRENGTH. Masked to 2 bits since the
-// Kconfig choice constrains it to 0-3 but the underlying int has no `range`,
-// so a hand-edited sdkconfig could otherwise pass an out-of-range value.
+// output pins.
 #define GPIO_DRIVE_STRENGTH     ((gpio_drive_cap_t)(cmsis_dap_gpio_config->drive_strength & 0x3))
 
 /**************************************************************************************************
@@ -97,7 +81,9 @@ This information includes:
 
 #include <esp_timer.h>
 #include "device_config.h"
-#ifdef CONFIG_ESP_DAP_LED_RGB
+#if defined(CONFIG_ESP_DAP_1_LED_RGB) || \
+    defined(CONFIG_ESP_DAP_2_LED_RGB) || \
+    defined(CONFIG_ESP_DAP_3_LED_RGB)
 #include "ws2812_led.h"
 #endif
 
@@ -120,7 +106,9 @@ This information includes:
 
 /// Indicate that Serial Wire Debug (SWD) communication mode is available at the Debug Access Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
-#ifdef CONFIG_ESP_DAP_SWD_SUPPORTED
+#if defined(CONFIG_ESP_DAP_1_SWD_SUPPORTED) || \
+    defined(CONFIG_ESP_DAP_2_SWD_SUPPORTED) || \
+    defined(CONFIG_ESP_DAP_3_SWD_SUPPORTED)
 #define DAP_SWD                 1               ///< SWD Mode:  1 = available, 0 = not available.
 #else
 #define DAP_SWD                 0               ///< SWD Mode:  1 = available, 0 = not available.
@@ -128,11 +116,22 @@ This information includes:
 
 /// Indicate that JTAG communication mode is available at the Debug Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
-#ifdef CONFIG_ESP_DAP_JTAG_SUPPORTED
+#if defined(CONFIG_ESP_DAP_1_JTAG_SUPPORTED) || \
+    defined(CONFIG_ESP_DAP_2_JTAG_SUPPORTED) || \
+    defined(CONFIG_ESP_DAP_3_JTAG_SUPPORTED)
 #define DAP_JTAG                1               ///< JTAG Mode: 1 = available, 0 = not available.
 #else
 #define DAP_JTAG                0               ///< JTAG Mode: 1 = available, 0 = not available.
 #endif
+
+// DAP_SWD / DAP_JTAG only say the protocol is compiled in for at least one
+// interface -- not that *this* instance is wired for it. These check this
+// interfaces's pin validity, so they give the real per-interface answer.
+#define DAP_SWD_AVAILABLE()      ((DAP_SWD != 0) && \
+        GPIO_PIN_VALID(GPIO_SWCLK_TCK) && GPIO_PIN_VALID(GPIO_SWDIO_TMS))
+#define DAP_JTAG_AVAILABLE()     ((DAP_JTAG != 0) && \
+        GPIO_PIN_VALID(GPIO_SWCLK_TCK) && GPIO_PIN_VALID(GPIO_SWDIO_TMS) && \
+        GPIO_PIN_VALID(GPIO_TDI) && GPIO_PIN_VALID(GPIO_TDO))
 
 /// Configure maximum number of JTAG devices on the scan chain connected to the Debug Access Port.
 /// This setting impacts the RAM requirements of the Debug Unit. Valid range is 1 .. 255.
@@ -416,47 +415,43 @@ Configures the DAP Hardware I/O pins for JTAG mode:
 __STATIC_INLINE void PORT_JTAG_SETUP (void)
 {
 #if DAP_JTAG
-    gpio_set_level(GPIO_SWCLK_TCK, 1);
-    gpio_set_level(GPIO_SWDIO_TMS, 1);
-    gpio_set_level(GPIO_TDI, 1);
-    gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
-    gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_OUTPUT);
-    gpio_set_direction(GPIO_TDI, GPIO_MODE_OUTPUT);
-    gpio_set_direction(GPIO_TDO, GPIO_MODE_INPUT);
+    if (GPIO_PIN_VALID(GPIO_SWCLK_TCK) && GPIO_PIN_VALID(GPIO_SWDIO_TMS) &&
+            GPIO_PIN_VALID(GPIO_TDI) && GPIO_PIN_VALID(GPIO_TDO)) {
+        gpio_set_level(GPIO_SWCLK_TCK, 1);
+        gpio_set_level(GPIO_SWDIO_TMS, 1);
+        gpio_set_level(GPIO_TDI, 1);
+        gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
+        gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_OUTPUT);
+        gpio_set_direction(GPIO_TDI, GPIO_MODE_OUTPUT);
+        gpio_set_direction(GPIO_TDO, GPIO_MODE_INPUT);
 
-    // Configurable drive strength to trade off signal integrity vs. edge
-    // rate; see CONFIG_ESP_DAP_DRIVE_STRENGTH.
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_STRENGTH);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_STRENGTH);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_TDI, GPIO_DRIVE_STRENGTH);
+        // Configurable drive strength to trade off signal integrity vs. edge
+        // rate; see CONFIG_ESP_DAP_1_DRIVE_STRENGTH.
+        gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_STRENGTH);
+        gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_STRENGTH);
+        gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_TDI, GPIO_DRIVE_STRENGTH);
+    }
 #endif
 
-#ifdef GPIO_NTRST
     if (GPIO_PIN_VALID(GPIO_NTRST))
         gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NTRST,
                 GPIO_DRIVE_STRENGTH);
-#endif
-#ifdef GPIO_NRESET
+
     if (GPIO_PIN_VALID(GPIO_NRESET))
         gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET,
                 GPIO_DRIVE_STRENGTH);
-#endif
 
-#ifdef GPIO_NTRST
     if (GPIO_PIN_VALID(GPIO_NTRST)) {
         // NTRST as input with pullup.
         gpio_pullup_en(GPIO_NTRST);
         gpio_set_direction(GPIO_NTRST, GPIO_MODE_INPUT);
     }
-#endif
 
-#ifdef GPIO_NRESET
     if (GPIO_PIN_VALID(GPIO_NRESET)) {
         // NRESET (SRST) as input with pullup.
         gpio_pullup_en(GPIO_NRESET);
         gpio_set_direction(GPIO_NRESET, GPIO_MODE_INPUT);
     }
-#endif
 }
 
 /** Setup SWD I/O pins: SWCLK, SWDIO, and nRESET.
@@ -467,31 +462,29 @@ Configures the DAP Hardware I/O pins for Serial Wire Debug (SWD) mode:
 __STATIC_INLINE void PORT_SWD_SETUP (void)
 {
 #if DAP_SWD
-    // SWCLK as output low.
-    gpio_set_level(GPIO_SWCLK_TCK, 0);
-    gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
+    if (GPIO_PIN_VALID(GPIO_SWCLK_TCK) && GPIO_PIN_VALID(GPIO_SWDIO_TMS)) {
+        // SWCLK as output low.
+        gpio_set_level(GPIO_SWCLK_TCK, 0);
+        gpio_set_direction(GPIO_SWCLK_TCK, GPIO_MODE_OUTPUT);
 
-    // SWD as output low.
-    gpio_pullup_en(GPIO_SWDIO_TMS);
-    gpio_set_level(GPIO_SWDIO_TMS, 0);
-    gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_OUTPUT);
+        // SWD as output low.
+        gpio_pullup_en(GPIO_SWDIO_TMS);
+        gpio_set_level(GPIO_SWDIO_TMS, 0);
+        gpio_set_direction(GPIO_SWDIO_TMS, GPIO_MODE_OUTPUT);
 
-    // Configurable drive strength to trade off signal integrity vs. edge
-    // rate; see CONFIG_ESP_DAP_DRIVE_STRENGTH.
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_STRENGTH);
-    gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_STRENGTH);
+        // Configurable drive strength to trade off signal integrity vs. edge
+        // rate; see CONFIG_ESP_DAP_1_DRIVE_STRENGTH.
+        gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWCLK_TCK, GPIO_DRIVE_STRENGTH);
+        gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_SWDIO_TMS, GPIO_DRIVE_STRENGTH);
+    }
 #endif
 
-#ifdef GPIO_TDI
-    gpio_reset_pin(GPIO_TDI);
-#endif
+    if (GPIO_PIN_VALID(GPIO_TDI))
+        gpio_reset_pin(GPIO_TDI);
 
-#ifdef GPIO_NTRST
     if (GPIO_PIN_VALID(GPIO_NTRST))
         gpio_reset_pin(GPIO_NTRST);
-#endif
 
-#ifdef GPIO_NRESET
     if (GPIO_PIN_VALID(GPIO_NRESET)) {
         // SRST as input with pullup, until commanded otherwise.
         gpio_pullup_en(GPIO_NRESET);
@@ -499,7 +492,6 @@ __STATIC_INLINE void PORT_SWD_SETUP (void)
         gpio_ll_set_drive_capability(gpio_dev_ptr, GPIO_NRESET,
                 GPIO_DRIVE_STRENGTH);
     }
-#endif
 }
 
 /** Disable JTAG/SWD I/O Pins.
@@ -508,24 +500,20 @@ Disables the DAP Hardware I/O pins which configures:
 */
 __STATIC_INLINE void PORT_OFF (void)
 {
-#ifdef GPIO_SWCLK_TCK
-    gpio_reset_pin(GPIO_SWCLK_TCK);
-#endif
-#ifdef GPIO_SWDIO_TMS
-    gpio_reset_pin(GPIO_SWDIO_TMS);
-#endif
+    if (GPIO_PIN_VALID(GPIO_SWCLK_TCK))
+        gpio_reset_pin(GPIO_SWCLK_TCK);
+    if (GPIO_PIN_VALID(GPIO_SWDIO_TMS))
+        gpio_reset_pin(GPIO_SWDIO_TMS);
 #if DAP_JTAG
-    gpio_reset_pin(GPIO_TDI);
-    gpio_reset_pin(GPIO_TDO);
+    if (GPIO_PIN_VALID(GPIO_TDI))
+        gpio_reset_pin(GPIO_TDI);
+    if (GPIO_PIN_VALID(GPIO_TDO))
+        gpio_reset_pin(GPIO_TDO);
 #endif
-#ifdef GPIO_NTRST
     if (GPIO_PIN_VALID(GPIO_NTRST))
         gpio_reset_pin(GPIO_NTRST);
-#endif
-#ifdef GPIO_NRESET
     if (GPIO_PIN_VALID(GPIO_NRESET))
         gpio_reset_pin(GPIO_NRESET);
-#endif
 }
 
 
@@ -534,6 +522,9 @@ __STATIC_INLINE void PORT_OFF (void)
 /** SWCLK/TCK I/O pin: Get Input.
 \return Current status of the SWCLK/TCK DAP hardware I/O pin.
 */
+// No GPIO_PIN_VALID() check here: only DAP_SWJ_Pins() calls this, and it
+// checks validity itself, so every check for that function lives at that
+// one call site instead of being scattered across pin accessors.
 __STATIC_FORCEINLINE uint32_t PIN_SWCLK_TCK_IN  (void)
 {
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_SWCLK_TCK);
@@ -542,6 +533,9 @@ __STATIC_FORCEINLINE uint32_t PIN_SWCLK_TCK_IN  (void)
 /** SWCLK/TCK I/O pin: Set Output to High.
 Set the SWCLK/TCK DAP hardware I/O pin to high level.
 */
+// No GPIO_PIN_VALID() check here: this is the hottest path in the firmware
+// (one call per clock edge), and validity is already guaranteed by the
+// caller.
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_SET (void)
 {
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWCLK_TCK, 1);
@@ -552,9 +546,7 @@ Set the SWCLK/TCK DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void)
 {
-#ifdef GPIO_SWCLK_TCK
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWCLK_TCK, 0);
-#endif
 }
 
 
@@ -563,23 +555,20 @@ __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void)
 /** SWDIO/TMS I/O pin: Get Input.
 \return Current status of the SWDIO/TMS DAP hardware I/O pin.
 */
+// No GPIO_PIN_VALID() check here: see PIN_SWCLK_TCK_IN() above.
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_TMS_IN  (void)
 {
-#ifdef GPIO_SWDIO_TMS
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_SWDIO_TMS);
-#else
-    return 0;
-#endif
 }
 
 /** SWDIO/TMS I/O pin: Set Output to High.
 Set the SWDIO/TMS DAP hardware I/O pin to high level.
 */
+// No GPIO_PIN_VALID() check here: hot path, see PIN_SWCLK_TCK_SET() above
+// for where validity is actually guaranteed.
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_SET (void)
 {
-#ifdef GPIO_SWDIO_TMS
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, 1);
-#endif
 }
 
 /** SWDIO/TMS I/O pin: Set Output to Low.
@@ -587,21 +576,17 @@ Set the SWDIO/TMS DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_CLR (void)
 {
-#ifdef GPIO_SWDIO_TMS
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, 0);
-#endif
 }
 
 /** SWDIO I/O pin: Get Input (used in SWD mode only).
 \return Current status of the SWDIO DAP hardware I/O pin.
 */
+// No GPIO_PIN_VALID() check here: hot path, see PIN_SWCLK_TCK_SET() above
+// for where validity is actually guaranteed.
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void)
 {
-#ifdef GPIO_SWDIO_TMS
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_SWDIO_TMS);
-#else
-    return 0;
-#endif
 }
 
 /** SWDIO I/O pin: Set Output (used in SWD mode only).
@@ -609,9 +594,7 @@ __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void)
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT     (uint32_t bit)
 {
-#ifdef GPIO_SWDIO_TMS
     gpio_ll_set_level(gpio_dev_ptr, GPIO_SWDIO_TMS, bit & 1);
-#endif
 }
 
 /** SWDIO I/O pin: Switch to Output mode (used in SWD mode only).
@@ -620,9 +603,7 @@ called prior \ref PIN_SWDIO_OUT function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_ENABLE  (void)
 {
-#ifdef GPIO_SWDIO_TMS
     gpio_ll_output_enable(gpio_dev_ptr, GPIO_SWDIO_TMS);
-#endif
 }
 
 /** SWDIO I/O pin: Switch to Input mode (used in SWD mode only).
@@ -631,10 +612,8 @@ called prior \ref PIN_SWDIO_IN function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 {
-#ifdef GPIO_SWDIO_TMS
     gpio_ll_output_disable(gpio_dev_ptr, GPIO_SWDIO_TMS);
     gpio_ll_input_enable(gpio_dev_ptr, GPIO_SWDIO_TMS);
-#endif
 }
 
 
@@ -643,23 +622,20 @@ __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void)
 /** TDI I/O pin: Get Input.
 \return Current status of the TDI DAP hardware I/O pin.
 */
+// No GPIO_PIN_VALID() check here: see PIN_SWCLK_TCK_IN() above.
 __STATIC_FORCEINLINE uint32_t PIN_TDI_IN  (void)
 {
-#ifdef GPIO_TDI
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_TDI);
-#else
-    return 0;
-#endif
 }
 
 /** TDI I/O pin: Set Output.
 \param bit Output value for the TDI DAP hardware I/O pin.
 */
+// No GPIO_PIN_VALID() check here: hot path, see PIN_SWCLK_TCK_SET() above
+// for where validity is actually guaranteed.
 __STATIC_FORCEINLINE void     PIN_TDI_OUT (uint32_t bit)
 {
-#ifdef GPIO_TDI
     gpio_ll_set_level(gpio_dev_ptr, GPIO_TDI, bit & 1);
-#endif
 }
 
 
@@ -668,13 +644,11 @@ __STATIC_FORCEINLINE void     PIN_TDI_OUT (uint32_t bit)
 /** TDO I/O pin: Get Input.
 \return Current status of the TDO DAP hardware I/O pin.
 */
+// No GPIO_PIN_VALID() check here: hot path (JTAG), and the one caller not
+// covered by DAP_Connect()'s gate -- DAP_SWJ_Pins() -- checks it directly.
 __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 {
-#ifdef GPIO_TDO
     return gpio_ll_get_level(gpio_dev_ptr, GPIO_TDO);
-#else
-    return 0;
-#endif
 }
 
 
@@ -685,11 +659,9 @@ __STATIC_FORCEINLINE uint32_t PIN_TDO_IN  (void)
 */
 __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 {
-#ifdef GPIO_NTRST
-    if (GPIO_PIN_VALID(GPIO_NTRST))
-        return gpio_ll_get_level(gpio_dev_ptr, GPIO_NTRST);
-#endif
-    return 0;
+    if (!GPIO_PIN_VALID(GPIO_NTRST))
+        return 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_NTRST);
 }
 
 /** nTRST I/O pin: Set Output.
@@ -699,7 +671,6 @@ __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN   (void)
 */
 __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 {
-#ifdef GPIO_NTRST
     if (!GPIO_PIN_VALID(GPIO_NTRST))
         return;
 
@@ -712,7 +683,6 @@ __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
         gpio_ll_set_level(gpio_dev_ptr, GPIO_NTRST, 0);
         gpio_ll_output_enable(gpio_dev_ptr, GPIO_NTRST);
     }
-#endif
 }
 
 // nRESET Pin I/O------------------------------------------
@@ -722,11 +692,9 @@ __STATIC_FORCEINLINE void     PIN_nTRST_OUT  (uint32_t bit)
 */
 __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN  (void)
 {
-#ifdef GPIO_NRESET
-    if (GPIO_PIN_VALID(GPIO_NRESET))
-        return gpio_ll_get_level(gpio_dev_ptr, GPIO_NRESET);
-#endif
-    return 0;
+    if (!GPIO_PIN_VALID(GPIO_NRESET))
+        return 0;
+    return gpio_ll_get_level(gpio_dev_ptr, GPIO_NRESET);
 }
 
 /** nRESET I/O pin: Set Output.
@@ -736,7 +704,6 @@ __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN  (void)
 */
 __STATIC_FORCEINLINE void     PIN_nRESET_OUT (uint32_t bit)
 {
-#ifdef GPIO_NRESET
     if (!GPIO_PIN_VALID(GPIO_NRESET))
         return;
 
@@ -749,7 +716,6 @@ __STATIC_FORCEINLINE void     PIN_nRESET_OUT (uint32_t bit)
         gpio_ll_set_level(gpio_dev_ptr, GPIO_NRESET, 0);
         gpio_ll_output_enable(gpio_dev_ptr, GPIO_NRESET);
     }
-#endif
 }
 
 ///@}
@@ -775,23 +741,33 @@ It is recommended to provide the following LEDs for status indication:
 */
 __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit)
 {
-#if CONFIG_ESP_DAP_LED_RGB
     if (!GPIO_PIN_VALID(GPIO_LED))
         return;
 
-    if(bit & 1)
-        set_rgb_led(GPIO_LED, CONFIG_ESP_DAP_LED_RGB_INTENSITY_R,
-                    CONFIG_ESP_DAP_LED_RGB_INTENSITY_G,
-                    CONFIG_ESP_DAP_LED_RGB_INTENSITY_B);
-    else
-        set_rgb_led(GPIO_LED, 0, 0, 0);
-#elif defined(CONFIG_ESP_DAP_LED_STANDARD)
-    if (!GPIO_PIN_VALID(GPIO_LED))
-        return;
-
-    gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
-    gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, GPIO_LED_ACTIVE_HIGH ? bit : !bit);
+    switch (cmsis_dap_gpio_config->led_type) {
+#if defined(CONFIG_ESP_DAP_1_LED_RGB) || \
+    defined(CONFIG_ESP_DAP_2_LED_RGB) || \
+    defined(CONFIG_ESP_DAP_3_LED_RGB)
+        case CMSIS_DAP_LED_RGB:
+            if (bit & 1)
+                set_rgb_led(GPIO_LED, cmsis_dap_gpio_config->led_rgb_r,
+                            cmsis_dap_gpio_config->led_rgb_g,
+                            cmsis_dap_gpio_config->led_rgb_b);
+            else
+                set_rgb_led(GPIO_LED, 0, 0, 0);
+            break;
 #endif
+#if defined(CONFIG_ESP_DAP_1_LED_STANDARD) || \
+    defined(CONFIG_ESP_DAP_2_LED_STANDARD) || \
+    defined(CONFIG_ESP_DAP_3_LED_STANDARD)
+        case CMSIS_DAP_LED_STANDARD:
+            gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+            gpio_ll_set_level(gpio_dev_ptr, GPIO_LED, GPIO_LED_ACTIVE_HIGH ? bit : !bit);
+            break;
+#endif
+        default:
+            break;
+    }
 }
 
 /** Debug Unit: Set status Target Running LED.
@@ -848,38 +824,49 @@ Status LEDs. In detail the operation of Hardware I/O and LED pins are enabled an
 __STATIC_INLINE void DAP_SETUP (void)
 {
 #if (DAP_JTAG == 1) || (DAP_SWD == 1)
-    gpio_reset_pin(GPIO_SWCLK_TCK);
-    gpio_reset_pin(GPIO_SWDIO_TMS);
+    if (GPIO_PIN_VALID(GPIO_SWCLK_TCK))
+        gpio_reset_pin(GPIO_SWCLK_TCK);
+    if (GPIO_PIN_VALID(GPIO_SWDIO_TMS))
+        gpio_reset_pin(GPIO_SWDIO_TMS);
 #endif
 #if DAP_JTAG
-    gpio_reset_pin(GPIO_TDI);
-    gpio_reset_pin(GPIO_TDO);
+    if (GPIO_PIN_VALID(GPIO_TDI))
+        gpio_reset_pin(GPIO_TDI);
+    if (GPIO_PIN_VALID(GPIO_TDO))
+        gpio_reset_pin(GPIO_TDO);
 #endif
-#ifdef GPIO_NTRST
     if (GPIO_PIN_VALID(GPIO_NTRST)) {
         gpio_reset_pin(GPIO_NTRST);
         gpio_pullup_en(GPIO_NTRST);
     }
-#endif
-#ifdef GPIO_NRESET
     if (GPIO_PIN_VALID(GPIO_NRESET)) {
         gpio_reset_pin(GPIO_NRESET);
         gpio_pullup_en(GPIO_NRESET);
     }
-#endif
-#ifdef GPIO_LED
     if (GPIO_PIN_VALID(GPIO_LED))
         gpio_reset_pin(GPIO_LED);
-#endif
-#ifdef CONFIG_ESP_DAP_LED_RGB
-    if (GPIO_PIN_VALID(GPIO_LED))
-        set_rgb_led(GPIO_LED, 0, 0, 0);
-#elif defined(CONFIG_ESP_DAP_LED_STANDARD)
+
     if (GPIO_PIN_VALID(GPIO_LED)) {
-        gpio_set_level(GPIO_LED, GPIO_LED_ACTIVE_HIGH ? 0 : 1);
-        gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
-    }
+        switch (cmsis_dap_gpio_config->led_type) {
+#if defined(CONFIG_ESP_DAP_1_LED_RGB) || \
+    defined(CONFIG_ESP_DAP_2_LED_RGB) || \
+    defined(CONFIG_ESP_DAP_3_LED_RGB)
+            case CMSIS_DAP_LED_RGB:
+                set_rgb_led(GPIO_LED, 0, 0, 0);
+                break;
 #endif
+#if defined(CONFIG_ESP_DAP_1_LED_STANDARD) || \
+    defined(CONFIG_ESP_DAP_2_LED_STANDARD) || \
+    defined(CONFIG_ESP_DAP_3_LED_STANDARD)
+            case CMSIS_DAP_LED_STANDARD:
+                gpio_set_level(GPIO_LED, GPIO_LED_ACTIVE_HIGH ? 0 : 1);
+                gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
+                break;
+#endif
+            default:
+                break;
+        }
+    }
 }
 
 /** Reset Target Device with custom specific I/O pin or command sequence.

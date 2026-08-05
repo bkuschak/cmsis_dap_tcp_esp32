@@ -163,12 +163,11 @@ If you want to support multiple independent JTAG/SWD interfaces, or use this
 code as component in another application see [this
 section](#multiple-interfaces--usage-as-a-component) below.
 
-If you experience problems, additional debugging messages can be enabled by
-editing ```main/cmsis_dap_tcp.h``` and uncommenting the following line. This
-will impact performance.
+If you experience problems, additional debugging messages can be enabled in
+menuconfig. This will impact performance.
 
 ```
-#define DEBUG_PRINTING
+CMSIS-DAP configuration → Enable debug logging for the CMSIS-DAP TCP server
 ```
 
 # Running the Firmware

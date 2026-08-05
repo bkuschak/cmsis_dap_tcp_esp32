@@ -79,7 +79,9 @@
 #include "cmsis_dap_tcp.h"
 #include "uart_bridge.h"
 
-#ifdef CONFIG_ESP_DAP_LED_RGB
+#if defined(CONFIG_ESP_DAP_1_LED_RGB) || \
+    defined(CONFIG_ESP_DAP_2_LED_RGB) || \
+    defined(CONFIG_ESP_DAP_3_LED_RGB)
 #include "ws2812_led.h"
 #endif
 
@@ -323,15 +325,38 @@ static int wifi_cmd_handler(int argc, char **argv)
     return 0;
 }
 
-#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+#if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
+
 // UART command argument structure.
 static struct {
+    struct arg_int *instance;
     struct arg_int *baud_rate;
     struct arg_int *data_bits;
     struct arg_str *parity;
     struct arg_int *stop_bits;
     struct arg_end *end;
 } uart_args;
+
+// Map a UART bridge instance number (1/2/3) to the physical UART peripheral
+// number it's configured to use. Returns -1 if that instance doesn't exist
+// or isn't enabled.
+static int uart_bridge_instance_to_uart_num(int instance)
+{
+    switch (instance) {
+#ifdef CONFIG_ESP_UART_BRIDGE_1_ENABLED
+    case 1: return CONFIG_ESP_UART_BRIDGE_1_UART_NUM;
+#endif
+#ifdef CONFIG_ESP_UART_BRIDGE_2_ENABLED
+    case 2: return CONFIG_ESP_UART_BRIDGE_2_UART_NUM;
+#endif
+#ifdef CONFIG_ESP_UART_BRIDGE_3_ENABLED
+    case 3: return CONFIG_ESP_UART_BRIDGE_3_UART_NUM;
+#endif
+    default: return -1;
+    }
+}
 
 static bool parse_uart_parity(const char* parity_str, uart_parity_t* out)
 {
@@ -352,7 +377,9 @@ static int uart_cmd_handler(int argc, char **argv)
     int nerrors = arg_parse(argc, argv, (void **) &uart_args);
     if (nerrors != 0) {
         arg_print_errors(stderr, uart_args.end, argv[0]);
-        printf("Usage: uart <baud_rate> <data_bits> <parity> <stop_bits>\n");
+        printf("Usage: uart <instance> <baud_rate> <data_bits> <parity> "
+                "<stop_bits>\n");
+        printf("  instance: which UART bridge to configure (1, 2, or 3)\n");
         printf("  data_bits: 7 or 8\n");
         printf("  parity: n (none), e (even), o (odd) -- case-insensitive\n");
         printf("  stop_bits: 1 or 2\n");
@@ -361,15 +388,22 @@ static int uart_cmd_handler(int argc, char **argv)
         return 1;
     }
 
+    int instance = uart_args.instance->ival[0];
     int baud_rate = uart_args.baud_rate->ival[0];
     int data_bits = uart_args.data_bits->ival[0];
     const char* parity_str = uart_args.parity->sval[0];
     int stop_bits = uart_args.stop_bits->ival[0];
 
+    int uart_num = uart_bridge_instance_to_uart_num(instance);
+    if (uart_num < 0) {
+        printf("Error: no enabled UART bridge instance %d.\n", instance);
+        return 1;
+    }
+
     // A baud rate of 0 clears the stored settings.
     if (baud_rate == 0) {
         printf("Clearing UART settings from flash.\n");
-        esp_err_t err = uart_bridge_clear_config(CONFIG_ESP_UART_BRIDGE_UART_NUM);
+        esp_err_t err = uart_bridge_clear_config(uart_num);
         if (err == ESP_OK) {
             printf("UART settings cleared successfully.\n");
             printf("New connections will use CONFIG defaults.\n");
@@ -399,22 +433,35 @@ static int uart_cmd_handler(int argc, char **argv)
     }
 
     printf("UART settings received:\n");
+    printf("  Instance: %d\n", instance);
+    printf("  UART number: %d\n", uart_num);
     printf("  Baud rate: %d\n", baud_rate);
     printf("  Data bits: %d\n", data_bits);
     printf("  Parity: %s\n", parity_str);
     printf("  Stop bits: %d\n", stop_bits);
 
-    esp_err_t err = uart_bridge_save_config(CONFIG_ESP_UART_BRIDGE_UART_NUM,
-            baud_rate,
-            data_bits == 7 ? UART_DATA_7_BITS : UART_DATA_8_BITS,
-            parity,
-            stop_bits == 2 ? UART_STOP_BITS_2 : UART_STOP_BITS_1);
+    uart_word_length_t data_bits_enum =
+            data_bits == 7 ? UART_DATA_7_BITS : UART_DATA_8_BITS;
+    uart_stop_bits_t stop_bits_enum =
+            stop_bits == 2 ? UART_STOP_BITS_2 : UART_STOP_BITS_1;
+
+    esp_err_t err = uart_bridge_save_config(uart_num, baud_rate,
+            data_bits_enum, parity, stop_bits_enum);
     if (err == ESP_OK) {
         printf("UART settings saved successfully.\n");
-        printf("New connections will use these settings.\n");
     } else {
         printf("Error saving UART settings: %s\n", esp_err_to_name(err));
         return 1;
+    }
+
+    err = uart_bridge_apply_live_config(uart_num, baud_rate, data_bits_enum,
+            parity, stop_bits_enum);
+    if (err == ESP_OK) {
+        printf("Applied immediately to UART%d.\n", uart_num);
+    } else {
+        printf("Error applying settings immediately: %s\n",
+                esp_err_to_name(err));
+        printf("New connections will still use the saved settings.\n");
     }
     return 0;
 }
@@ -492,7 +539,9 @@ static int status_cmd_handler(int argc, char **argv)
 
     cmsis_dap_print_status();
 
-#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+#if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
     uart_bridge_print_status();
 #endif
     return 0;
@@ -504,9 +553,11 @@ static int help_cmd_handler(int argc, char **argv)
     printf("  help - Show this help message.\n");
     printf("  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure WiFi "
            "credentials.\n");
-#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
-    printf("  uart <baud_rate> <data_bits> <parity> <stop_bits> - Configure "
-           "UART bridge settings.\n");
+#if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
+    printf("  uart <instance> <baud_rate> <data_bits> <parity> <stop_bits> - "
+           "Configure UART bridge settings.\n");
 #endif
     printf("  reboot - Restart the device.\n");
     printf("  status - Report network status.\n");
@@ -540,6 +591,13 @@ static void commands_init(void)
 #else
 #error "Unsupported console type!"
 #endif
+
+    // The REPL setup above registers a per-keystroke "hints" callback that
+    // fires once the typed buffer's length matches a registered command
+    // name, rendering that command's .hint via ANSI escape codes. None of
+    // our commands set a .hint, so it has nothing useful to show, and on
+    // some terminals it shows up as garbage characters instead. Disable it.
+    linenoiseSetHintsCallback(NULL);
 
     // Register commands.
     const esp_console_cmd_t help_cmd = {
@@ -587,7 +645,11 @@ static void commands_init(void)
     printf("Enabling console commands.\n");
     ESP_ERROR_CHECK(esp_console_cmd_register(&wifi_cmd));
 
-#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+#if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
+    uart_args.instance = arg_int1(NULL, NULL, "<instance>",
+            "Which UART bridge to configure (1, 2, or 3)");
     uart_args.baud_rate = arg_int1(NULL, NULL, "<baud_rate>",
             "UART baud rate (0 clears stored settings)");
     uart_args.data_bits = arg_int1(NULL, NULL, "<data_bits>",
@@ -596,7 +658,7 @@ static void commands_init(void)
             "Parity: n, e, o (case-insensitive)");
     uart_args.stop_bits = arg_int1(NULL, NULL, "<stop_bits>",
             "Stop bits: 1 or 2");
-    uart_args.end = arg_end(4);
+    uart_args.end = arg_end(5);
 
     const esp_console_cmd_t uart_cmd = {
         .command = "uart",
@@ -772,7 +834,8 @@ static BaseType_t cmsis_dap_tcp_task_start(void)
     // Configure one CMSIS-DAP-TCP task. Static: must remain valid for the
     // task's lifetime, per cmsis_dap_tcp_start()'s contract.
     static struct cmsis_dap_tcp_config config = {
-        .port = CONFIG_ESP_DAP_TCP_PORT,
+        .instance = 1,
+        .port = CONFIG_ESP_DAP_1_TCP_PORT,
 #ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
         .disable_keepalive = false,
         .keepalive_timeout = CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT,
@@ -781,43 +844,53 @@ static BaseType_t cmsis_dap_tcp_task_start(void)
         .keepalive_timeout = 0,
 #endif
         .gpio = {
-#if defined(CONFIG_ESP_DAP_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_SWD_SUPPORTED)
-            .swclk_tck = CONFIG_ESP_DAP_GPIO_SWCLK_TCK,
-            .swdio_tms = CONFIG_ESP_DAP_GPIO_SWDIO_TMS,
+#if defined(CONFIG_ESP_DAP_1_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_1_SWD_SUPPORTED)
+            .swclk_tck = CONFIG_ESP_DAP_1_GPIO_SWCLK_TCK,
+            .swdio_tms = CONFIG_ESP_DAP_1_GPIO_SWDIO_TMS,
 #else
             .swclk_tck = -1,
             .swdio_tms = -1,
 #endif
-#ifdef CONFIG_ESP_DAP_JTAG_SUPPORTED
-            .tdi = CONFIG_ESP_DAP_GPIO_TDI,
-            .tdo = CONFIG_ESP_DAP_GPIO_TDO,
+#ifdef CONFIG_ESP_DAP_1_JTAG_SUPPORTED
+            .tdi = CONFIG_ESP_DAP_1_GPIO_TDI,
+            .tdo = CONFIG_ESP_DAP_1_GPIO_TDO,
 #else
             .tdi = -1,
             .tdo = -1,
 #endif
-#ifdef CONFIG_ESP_DAP_JTAG_NTRST_SUPPORTED
-            .ntrst = CONFIG_ESP_DAP_GPIO_NTRST,
+#if defined(CONFIG_ESP_DAP_1_JTAG_SUPPORTED) && defined(CONFIG_ESP_DAP_1_JTAG_NTRST_SUPPORTED)
+            .ntrst = CONFIG_ESP_DAP_1_GPIO_NTRST,
 #else
             .ntrst = -1,
 #endif
-#ifdef CONFIG_ESP_DAP_NRESET_SUPPORTED
-            .nreset = CONFIG_ESP_DAP_GPIO_NRESET,
+#ifdef CONFIG_ESP_DAP_1_NRESET_SUPPORTED
+            .nreset = CONFIG_ESP_DAP_1_GPIO_NRESET,
 #else
             .nreset = -1,
 #endif
-#if defined(CONFIG_ESP_DAP_LED_STANDARD) || defined(CONFIG_ESP_DAP_LED_RGB)
-            .led = CONFIG_ESP_DAP_GPIO_LED,
+#if defined(CONFIG_ESP_DAP_1_LED_STANDARD) || defined(CONFIG_ESP_DAP_1_LED_RGB)
+            .led = CONFIG_ESP_DAP_1_GPIO_LED,
 #else
             .led = -1,
 #endif
-#ifdef CONFIG_ESP_DAP_LED_ACTIVE_HIGH
+#ifdef CONFIG_ESP_DAP_1_LED_ACTIVE_HIGH
             .led_active_high = true,
 #else
             .led_active_high = false,
 #endif
+#if defined(CONFIG_ESP_DAP_1_LED_RGB)
+            .led_type = CMSIS_DAP_LED_RGB,
+            .led_rgb_r = CONFIG_ESP_DAP_1_LED_RGB_INTENSITY_R,
+            .led_rgb_g = CONFIG_ESP_DAP_1_LED_RGB_INTENSITY_G,
+            .led_rgb_b = CONFIG_ESP_DAP_1_LED_RGB_INTENSITY_B,
+#elif defined(CONFIG_ESP_DAP_1_LED_STANDARD)
+            .led_type = CMSIS_DAP_LED_STANDARD,
+#else
+            .led_type = CMSIS_DAP_LED_NONE,
+#endif
             .io_port_write_cycles = CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES,
             .delay_slow_cycles = CONFIG_ESP_DAP_DELAY_SLOW_CYCLES,
-            .drive_strength = CONFIG_ESP_DAP_DRIVE_STRENGTH,
+            .drive_strength = CONFIG_ESP_DAP_1_DRIVE_STRENGTH,
         },
     };
 
@@ -827,54 +900,305 @@ static BaseType_t cmsis_dap_tcp_task_start(void)
     return ret;
 }
 
-#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+#ifdef CONFIG_ESP_DAP_2_ENABLED
+static BaseType_t cmsis_dap_tcp_2_task_start(void)
+{
+    // Configure the second CMSIS-DAP-TCP task. Static: must remain valid for
+    // the task's lifetime, per cmsis_dap_tcp_start()'s contract.
+    static struct cmsis_dap_tcp_config config = {
+        .instance = 2,
+        .port = CONFIG_ESP_DAP_2_TCP_PORT,
+#ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
+        .disable_keepalive = false,
+        .keepalive_timeout = CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT,
+#else
+        .disable_keepalive = true,
+        .keepalive_timeout = 0,
+#endif
+        .gpio = {
+#if defined(CONFIG_ESP_DAP_2_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_2_SWD_SUPPORTED)
+            .swclk_tck = CONFIG_ESP_DAP_2_GPIO_SWCLK_TCK,
+            .swdio_tms = CONFIG_ESP_DAP_2_GPIO_SWDIO_TMS,
+#else
+            .swclk_tck = -1,
+            .swdio_tms = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_2_JTAG_SUPPORTED
+            .tdi = CONFIG_ESP_DAP_2_GPIO_TDI,
+            .tdo = CONFIG_ESP_DAP_2_GPIO_TDO,
+#else
+            .tdi = -1,
+            .tdo = -1,
+#endif
+#if defined(CONFIG_ESP_DAP_2_JTAG_SUPPORTED) && defined(CONFIG_ESP_DAP_2_JTAG_NTRST_SUPPORTED)
+            .ntrst = CONFIG_ESP_DAP_2_GPIO_NTRST,
+#else
+            .ntrst = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_2_NRESET_SUPPORTED
+            .nreset = CONFIG_ESP_DAP_2_GPIO_NRESET,
+#else
+            .nreset = -1,
+#endif
+#if defined(CONFIG_ESP_DAP_2_LED_STANDARD) || defined(CONFIG_ESP_DAP_2_LED_RGB)
+            .led = CONFIG_ESP_DAP_2_GPIO_LED,
+#else
+            .led = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_2_LED_ACTIVE_HIGH
+            .led_active_high = true,
+#else
+            .led_active_high = false,
+#endif
+#if defined(CONFIG_ESP_DAP_2_LED_RGB)
+            .led_type = CMSIS_DAP_LED_RGB,
+            .led_rgb_r = CONFIG_ESP_DAP_2_LED_RGB_INTENSITY_R,
+            .led_rgb_g = CONFIG_ESP_DAP_2_LED_RGB_INTENSITY_G,
+            .led_rgb_b = CONFIG_ESP_DAP_2_LED_RGB_INTENSITY_B,
+#elif defined(CONFIG_ESP_DAP_2_LED_STANDARD)
+            .led_type = CMSIS_DAP_LED_STANDARD,
+#else
+            .led_type = CMSIS_DAP_LED_NONE,
+#endif
+            .io_port_write_cycles = CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES,
+            .delay_slow_cycles = CONFIG_ESP_DAP_DELAY_SLOW_CYCLES,
+            .drive_strength = CONFIG_ESP_DAP_2_DRIVE_STRENGTH,
+        },
+    };
+
+    BaseType_t ret = cmsis_dap_tcp_start(&config, "cmsis_dap_tcp_task_2", NULL);
+    if(ret == pdPASS)
+        cmsis_dap_tcp_initialized = true;
+    return ret;
+}
+#endif
+
+#ifdef CONFIG_ESP_DAP_3_ENABLED
+static BaseType_t cmsis_dap_tcp_3_task_start(void)
+{
+    // Configure the third CMSIS-DAP-TCP task. Static: must remain valid for
+    // the task's lifetime, per cmsis_dap_tcp_start()'s contract.
+    static struct cmsis_dap_tcp_config config = {
+        .instance = 3,
+        .port = CONFIG_ESP_DAP_3_TCP_PORT,
+#ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
+        .disable_keepalive = false,
+        .keepalive_timeout = CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT,
+#else
+        .disable_keepalive = true,
+        .keepalive_timeout = 0,
+#endif
+        .gpio = {
+#if defined(CONFIG_ESP_DAP_3_JTAG_SUPPORTED) || defined(CONFIG_ESP_DAP_3_SWD_SUPPORTED)
+            .swclk_tck = CONFIG_ESP_DAP_3_GPIO_SWCLK_TCK,
+            .swdio_tms = CONFIG_ESP_DAP_3_GPIO_SWDIO_TMS,
+#else
+            .swclk_tck = -1,
+            .swdio_tms = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_3_JTAG_SUPPORTED
+            .tdi = CONFIG_ESP_DAP_3_GPIO_TDI,
+            .tdo = CONFIG_ESP_DAP_3_GPIO_TDO,
+#else
+            .tdi = -1,
+            .tdo = -1,
+#endif
+#if defined(CONFIG_ESP_DAP_3_JTAG_SUPPORTED) && defined(CONFIG_ESP_DAP_3_JTAG_NTRST_SUPPORTED)
+            .ntrst = CONFIG_ESP_DAP_3_GPIO_NTRST,
+#else
+            .ntrst = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_3_NRESET_SUPPORTED
+            .nreset = CONFIG_ESP_DAP_3_GPIO_NRESET,
+#else
+            .nreset = -1,
+#endif
+#if defined(CONFIG_ESP_DAP_3_LED_STANDARD) || defined(CONFIG_ESP_DAP_3_LED_RGB)
+            .led = CONFIG_ESP_DAP_3_GPIO_LED,
+#else
+            .led = -1,
+#endif
+#ifdef CONFIG_ESP_DAP_3_LED_ACTIVE_HIGH
+            .led_active_high = true,
+#else
+            .led_active_high = false,
+#endif
+#if defined(CONFIG_ESP_DAP_3_LED_RGB)
+            .led_type = CMSIS_DAP_LED_RGB,
+            .led_rgb_r = CONFIG_ESP_DAP_3_LED_RGB_INTENSITY_R,
+            .led_rgb_g = CONFIG_ESP_DAP_3_LED_RGB_INTENSITY_G,
+            .led_rgb_b = CONFIG_ESP_DAP_3_LED_RGB_INTENSITY_B,
+#elif defined(CONFIG_ESP_DAP_3_LED_STANDARD)
+            .led_type = CMSIS_DAP_LED_STANDARD,
+#else
+            .led_type = CMSIS_DAP_LED_NONE,
+#endif
+            .io_port_write_cycles = CONFIG_ESP_DAP_IO_PORT_WRITE_CYCLES,
+            .delay_slow_cycles = CONFIG_ESP_DAP_DELAY_SLOW_CYCLES,
+            .drive_strength = CONFIG_ESP_DAP_3_DRIVE_STRENGTH,
+        },
+    };
+
+    BaseType_t ret = cmsis_dap_tcp_start(&config, "cmsis_dap_tcp_task_3", NULL);
+    if(ret == pdPASS)
+        cmsis_dap_tcp_initialized = true;
+    return ret;
+}
+#endif
+
+#ifdef CONFIG_ESP_UART_BRIDGE_1_ENABLED
 static BaseType_t uart_bridge_task_start(void)
 {
     // Configure one UART bridge task.
     static const struct uart_bridge_config config = {
-        .port       = CONFIG_ESP_UART_BRIDGE_TCP_PORT,
-        .uart_num   = CONFIG_ESP_UART_BRIDGE_UART_NUM,
-#ifdef CONFIG_ESP_UART_BRIDGE_USE_KEEPALIVE
-        .keepalive_timeout = CONFIG_ESP_UART_BRIDGE_KEEPALIVE_TIMEOUT,
+        .instance   = 1,
+        .port       = CONFIG_ESP_UART_BRIDGE_1_TCP_PORT,
+        .uart_num   = CONFIG_ESP_UART_BRIDGE_1_UART_NUM,
+#ifdef CONFIG_ESP_UART_BRIDGE_1_USE_KEEPALIVE
+        .keepalive_timeout = CONFIG_ESP_UART_BRIDGE_1_KEEPALIVE_TIMEOUT,
 #else
         .keepalive_timeout = 0,
 #endif
-#ifdef CONFIG_ESP_UART_BRIDGE_REMAP_PINS
-        .txd_pin    = CONFIG_ESP_UART_BRIDGE_TXD_PIN,
-        .rxd_pin    = CONFIG_ESP_UART_BRIDGE_RXD_PIN,
+#ifdef CONFIG_ESP_UART_BRIDGE_1_REMAP_PINS
+        .txd_pin    = CONFIG_ESP_UART_BRIDGE_1_TXD_PIN,
+        .rxd_pin    = CONFIG_ESP_UART_BRIDGE_1_RXD_PIN,
 #else
         .txd_pin    = UART_PIN_NO_CHANGE,
         .rxd_pin    = UART_PIN_NO_CHANGE,
 #endif
-        .baud_rate  = CONFIG_ESP_UART_BRIDGE_BAUD_RATE,
-#if defined(CONFIG_ESP_UART_BRIDGE_PARITY_NONE)
+        .baud_rate  = CONFIG_ESP_UART_BRIDGE_1_BAUD_RATE,
+#if defined(CONFIG_ESP_UART_BRIDGE_1_PARITY_NONE)
         .parity     = UART_PARITY_DISABLE,
-#elif defined(CONFIG_ESP_UART_BRIDGE_PARITY_EVEN)
+#elif defined(CONFIG_ESP_UART_BRIDGE_1_PARITY_EVEN)
         .parity     = UART_PARITY_EVEN,
-#elif defined(CONFIG_ESP_UART_BRIDGE_PARITY_ODD)
+#elif defined(CONFIG_ESP_UART_BRIDGE_1_PARITY_ODD)
         .parity     = UART_PARITY_ODD,
 #else
-#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_PARITY."
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_1_PARITY."
 #endif
 
-#if CONFIG_ESP_UART_BRIDGE_DATA_BITS == 7
+#if CONFIG_ESP_UART_BRIDGE_1_DATA_BITS == 7
         .data_bits  = UART_DATA_7_BITS,
-#elif CONFIG_ESP_UART_BRIDGE_DATA_BITS == 8
+#elif CONFIG_ESP_UART_BRIDGE_1_DATA_BITS == 8
         .data_bits  = UART_DATA_8_BITS,
 #else
-#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_DATA_BITS."
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_1_DATA_BITS."
 #endif
 
-#if CONFIG_ESP_UART_BRIDGE_STOP_BITS == 1
+#if CONFIG_ESP_UART_BRIDGE_1_STOP_BITS == 1
         .stop_bits  = UART_STOP_BITS_1,
-#elif CONFIG_ESP_UART_BRIDGE_STOP_BITS == 2
+#elif CONFIG_ESP_UART_BRIDGE_1_STOP_BITS == 2
         .stop_bits  = UART_STOP_BITS_2,
 #else
-#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_STOP_BITS."
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_1_STOP_BITS."
 #endif
     };
 
     return uart_bridge_start(&config, "uart_bridge_task", NULL);
+}
+#endif
+
+#ifdef CONFIG_ESP_UART_BRIDGE_2_ENABLED
+static BaseType_t uart_bridge_2_task_start(void)
+{
+    // Configure the second UART bridge task.
+    static const struct uart_bridge_config config = {
+        .instance   = 2,
+        .port       = CONFIG_ESP_UART_BRIDGE_2_TCP_PORT,
+        .uart_num   = CONFIG_ESP_UART_BRIDGE_2_UART_NUM,
+#ifdef CONFIG_ESP_UART_BRIDGE_2_USE_KEEPALIVE
+        .keepalive_timeout = CONFIG_ESP_UART_BRIDGE_2_KEEPALIVE_TIMEOUT,
+#else
+        .keepalive_timeout = 0,
+#endif
+#ifdef CONFIG_ESP_UART_BRIDGE_2_REMAP_PINS
+        .txd_pin    = CONFIG_ESP_UART_BRIDGE_2_TXD_PIN,
+        .rxd_pin    = CONFIG_ESP_UART_BRIDGE_2_RXD_PIN,
+#else
+        .txd_pin    = UART_PIN_NO_CHANGE,
+        .rxd_pin    = UART_PIN_NO_CHANGE,
+#endif
+        .baud_rate  = CONFIG_ESP_UART_BRIDGE_2_BAUD_RATE,
+#if defined(CONFIG_ESP_UART_BRIDGE_2_PARITY_NONE)
+        .parity     = UART_PARITY_DISABLE,
+#elif defined(CONFIG_ESP_UART_BRIDGE_2_PARITY_EVEN)
+        .parity     = UART_PARITY_EVEN,
+#elif defined(CONFIG_ESP_UART_BRIDGE_2_PARITY_ODD)
+        .parity     = UART_PARITY_ODD,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_2_PARITY."
+#endif
+
+#if CONFIG_ESP_UART_BRIDGE_2_DATA_BITS == 7
+        .data_bits  = UART_DATA_7_BITS,
+#elif CONFIG_ESP_UART_BRIDGE_2_DATA_BITS == 8
+        .data_bits  = UART_DATA_8_BITS,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_2_DATA_BITS."
+#endif
+
+#if CONFIG_ESP_UART_BRIDGE_2_STOP_BITS == 1
+        .stop_bits  = UART_STOP_BITS_1,
+#elif CONFIG_ESP_UART_BRIDGE_2_STOP_BITS == 2
+        .stop_bits  = UART_STOP_BITS_2,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_2_STOP_BITS."
+#endif
+    };
+
+    return uart_bridge_start(&config, "uart_bridge_task_2", NULL);
+}
+#endif
+
+#ifdef CONFIG_ESP_UART_BRIDGE_3_ENABLED
+static BaseType_t uart_bridge_3_task_start(void)
+{
+    // Configure the third UART bridge task.
+    static const struct uart_bridge_config config = {
+        .instance   = 3,
+        .port       = CONFIG_ESP_UART_BRIDGE_3_TCP_PORT,
+        .uart_num   = CONFIG_ESP_UART_BRIDGE_3_UART_NUM,
+#ifdef CONFIG_ESP_UART_BRIDGE_3_USE_KEEPALIVE
+        .keepalive_timeout = CONFIG_ESP_UART_BRIDGE_3_KEEPALIVE_TIMEOUT,
+#else
+        .keepalive_timeout = 0,
+#endif
+#ifdef CONFIG_ESP_UART_BRIDGE_3_REMAP_PINS
+        .txd_pin    = CONFIG_ESP_UART_BRIDGE_3_TXD_PIN,
+        .rxd_pin    = CONFIG_ESP_UART_BRIDGE_3_RXD_PIN,
+#else
+        .txd_pin    = UART_PIN_NO_CHANGE,
+        .rxd_pin    = UART_PIN_NO_CHANGE,
+#endif
+        .baud_rate  = CONFIG_ESP_UART_BRIDGE_3_BAUD_RATE,
+#if defined(CONFIG_ESP_UART_BRIDGE_3_PARITY_NONE)
+        .parity     = UART_PARITY_DISABLE,
+#elif defined(CONFIG_ESP_UART_BRIDGE_3_PARITY_EVEN)
+        .parity     = UART_PARITY_EVEN,
+#elif defined(CONFIG_ESP_UART_BRIDGE_3_PARITY_ODD)
+        .parity     = UART_PARITY_ODD,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_3_PARITY."
+#endif
+
+#if CONFIG_ESP_UART_BRIDGE_3_DATA_BITS == 7
+        .data_bits  = UART_DATA_7_BITS,
+#elif CONFIG_ESP_UART_BRIDGE_3_DATA_BITS == 8
+        .data_bits  = UART_DATA_8_BITS,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_3_DATA_BITS."
+#endif
+
+#if CONFIG_ESP_UART_BRIDGE_3_STOP_BITS == 1
+        .stop_bits  = UART_STOP_BITS_1,
+#elif CONFIG_ESP_UART_BRIDGE_3_STOP_BITS == 2
+        .stop_bits  = UART_STOP_BITS_2,
+#else
+#error "Invalid setting for CONFIG_ESP_UART_BRIDGE_3_STOP_BITS."
+#endif
+    };
+
+    return uart_bridge_start(&config, "uart_bridge_task_3", NULL);
 }
 #endif
 
@@ -949,9 +1273,33 @@ void app_main(void)
         printf("Failed to start CMSIS-DAP-TCP task.\n");
     }
 
-#ifdef CONFIG_ESP_UART_BRIDGE_ENABLED
+#ifdef CONFIG_ESP_DAP_2_ENABLED
+    if(cmsis_dap_tcp_2_task_start() != pdPASS) {
+        printf("Failed to start second CMSIS-DAP-TCP task.\n");
+    }
+#endif
+
+#ifdef CONFIG_ESP_DAP_3_ENABLED
+    if(cmsis_dap_tcp_3_task_start() != pdPASS) {
+        printf("Failed to start third CMSIS-DAP-TCP task.\n");
+    }
+#endif
+
+#ifdef CONFIG_ESP_UART_BRIDGE_1_ENABLED
     if(uart_bridge_task_start() != pdPASS) {
         printf("Failed to start UART bridge task.\n");
+    }
+#endif
+
+#ifdef CONFIG_ESP_UART_BRIDGE_2_ENABLED
+    if(uart_bridge_2_task_start() != pdPASS) {
+        printf("Failed to start second UART bridge task.\n");
+    }
+#endif
+
+#ifdef CONFIG_ESP_UART_BRIDGE_3_ENABLED
+    if(uart_bridge_3_task_start() != pdPASS) {
+        printf("Failed to start third UART bridge task.\n");
     }
 #endif
 

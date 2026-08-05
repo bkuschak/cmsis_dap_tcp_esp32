@@ -21,6 +21,19 @@
 #include "DAP.h"
 #include "cmsis_dap_tcp.h"
 
+#ifdef CONFIG_ESP_DAP_TCP_DEBUG_PRINTING
+#define LOG_DEBUG(...) \
+{ \
+    fprintf(stderr, "cmsis_dap_tcp %d: ", \
+            task_state->config->instance); \
+    fprintf(stderr, ##__VA_ARGS__); \
+    fprintf(stderr, "\n"); \
+}
+
+#else
+#define LOG_DEBUG(...) { }
+#endif
+
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define le_to_h_u16(a)  (a)
 #define le_to_h_u32(a)  (a)
@@ -91,6 +104,7 @@ struct cmsis_dap_tcp_state {
 
 static struct cmsis_dap_tcp_state *task_states[CMSIS_DAP_TCP_MAX_TASKS];
 static portMUX_TYPE task_states_mux = portMUX_INITIALIZER_UNLOCKED;
+static __thread struct cmsis_dap_tcp_state *task_state;
 
 // ---------------------------------------------------------------------------
 // Use our own receive buffer to accumulate from the socket until a complete
@@ -112,7 +126,8 @@ static int msgbuf_add(struct msgbuf_t *buf, int sock)
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK)
             return 0;       // no new data
-        perror("cmsis_dap_tcp: socket read error");
+        fprintf(stderr, "cmsis_dap_tcp %d: socket read error: %s\n",
+                task_state->config->instance, strerror(errno));
         return -1;
     }
     if (n == 0) {
@@ -138,14 +153,14 @@ static int msgbuf_parse(struct msgbuf_t *buf,
     tmp.length = le_to_h_u16(tmp.length);
 
     if (tmp.signature != DAP_PKT_HDR_SIGNATURE) {
-        fprintf(stderr, "cmsis_dap_tcp: Invalid header signature 0x%08lx\n",
-                tmp.signature);
+        fprintf(stderr, "cmsis_dap_tcp %d: Invalid header signature 0x%08lx\n",
+                task_state->config->instance, tmp.signature);
         return -EINVAL;
     }
 
     if (tmp.packet_type != DAP_PKT_TYPE_REQUEST) {
-        fprintf(stderr, "cmsis_dap_tcp: Unrecognized packet type 0x%02hx\n",
-                tmp.packet_type);
+        fprintf(stderr, "cmsis_dap_tcp %d: Unrecognized packet type 0x%02hx\n",
+                task_state->config->instance, tmp.packet_type);
         return -EINVAL;
     }
 
@@ -178,7 +193,8 @@ static int send_dap_response(struct cmsis_dap_tcp_state *state, int sock,
 {
     if (len > DAP_PKT_SIZE) {
         errno = EMSGSIZE;
-        perror("cmsis_dap_tcp: response too large for buffer");
+        fprintf(stderr, "cmsis_dap_tcp %d: response too large for buffer: %s\n",
+                task_state->config->instance, strerror(errno));
         return -1;
     }
 
@@ -201,12 +217,14 @@ static int send_dap_response(struct cmsis_dap_tcp_state *state, int sock,
                 continue;   // retry
             }
             else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                perror("cmsis_dap_tcp: socket write would block, dropping "
-                        "client");
+                fprintf(stderr, "cmsis_dap_tcp %d: socket write would block, "
+                        "dropping client: %s\n", task_state->config->instance,
+                        strerror(errno));
                 return -1;
             }
             else {
-                perror("cmsis_dap_tcp: socket write error");
+                fprintf(stderr, "cmsis_dap_tcp %d: socket write error: %s\n",
+                        task_state->config->instance, strerror(errno));
                 return -1;
             }
         }
@@ -257,8 +275,7 @@ static void set_keepalives(int fd, const struct cmsis_dap_tcp_config *config)
     val = config->keepalive_timeout;
     setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
 
-    LOG_DEBUG("cmsis_dap_tcp: Using TCP keepalives with %d second "
-            "timeout.", val);
+    LOG_DEBUG("Using TCP keepalives with %d second timeout.", val);
 #endif
 }
 
@@ -301,9 +318,18 @@ void cmsis_dap_print_status(void)
     struct {
         bool active;
         bool client_connected;
+        int instance;
         int port;
         int client_port;
         char client_ip_str[MAX_INET_ADDRSTRLEN];
+        int swclk_tck;
+        int swdio_tms;
+        int tdi;
+        int tdo;
+        int ntrst;
+        int nreset;
+        int led;
+        int drive_strength;
     } snapshot[CMSIS_DAP_TCP_MAX_TASKS] = {0};
 
     // Snapshot under the lock, then print afterward -- printf() is too slow
@@ -315,22 +341,39 @@ void cmsis_dap_print_status(void)
             continue;
         snapshot[i].active = true;
         snapshot[i].client_connected = state->client_connected;
+        snapshot[i].instance = state->config->instance;
         snapshot[i].port = state->config->port;
         snapshot[i].client_port = state->client_port;
         memcpy(snapshot[i].client_ip_str, state->client_ip_str,
                 sizeof(snapshot[i].client_ip_str));
+        snapshot[i].swclk_tck = state->config->gpio.swclk_tck;
+        snapshot[i].swdio_tms = state->config->gpio.swdio_tms;
+        snapshot[i].tdi = state->config->gpio.tdi;
+        snapshot[i].tdo = state->config->gpio.tdo;
+        snapshot[i].ntrst = state->config->gpio.ntrst;
+        snapshot[i].nreset = state->config->gpio.nreset;
+        snapshot[i].led = state->config->gpio.led;
+        snapshot[i].drive_strength = state->config->gpio.drive_strength;
     }
     portEXIT_CRITICAL(&task_states_mux);
 
     for (int i = 0; i < CMSIS_DAP_TCP_MAX_TASKS; i++) {
         if (!snapshot[i].active)
             continue;
+
+        printf("cmsis_dap_tcp %d: GPIOs: SWCLK=%d SWDIO=%d TDI=%d TDO=%d "
+                "NTRST=%d NRESET=%d LED=%d drive=%d\n", snapshot[i].instance,
+                snapshot[i].swclk_tck, snapshot[i].swdio_tms, snapshot[i].tdi,
+                snapshot[i].tdo, snapshot[i].ntrst, snapshot[i].nreset,
+                snapshot[i].led, snapshot[i].drive_strength);
+
         if (snapshot[i].client_connected) {
-            printf("cmsis_dap_tcp: listening on port %d, connected to "
-                    "client '%s:%d'.\n", snapshot[i].port,
+            printf("cmsis_dap_tcp %d: listening on port %d, connected to "
+                    "client '%s:%d'.\n", snapshot[i].instance, snapshot[i].port,
                     snapshot[i].client_ip_str, snapshot[i].client_port);
         } else {
-            printf("cmsis_dap_tcp: listening on port %d.\n", snapshot[i].port);
+            printf("cmsis_dap_tcp %d: listening on port %d.\n",
+                    snapshot[i].instance, snapshot[i].port);
         }
     }
 }
@@ -354,15 +397,18 @@ void cmsis_dap_tcp_task(void *arg)
 
     struct cmsis_dap_tcp_state *state = calloc(1, sizeof(*state));
     if (state == NULL) {
-        perror("cmsis_dap_tcp: failed to allocate task state");
+        fprintf(stderr, "cmsis_dap_tcp %d: failed to allocate task state: %s\n",
+                config->instance, strerror(errno));
         vTaskDelete(NULL);
         return;
     }
     state->config = config;
+    task_state = state;
 
     int resources_slot = reserve_resources(state);
     if (resources_slot < 0) {
-        fprintf(stderr, "cmsis_dap_tcp: resource conflict on port or JTAG pins.\n");
+        fprintf(stderr, "cmsis_dap_tcp %d: resource conflict on port or "
+                "JTAG pins.\n", task_state->config->instance);
         free(state);
         vTaskDelete(NULL);
         return;
@@ -370,11 +416,11 @@ void cmsis_dap_tcp_task(void *arg)
 
     cmsis_dap_gpio_config = &config->gpio;
     DAP_Data = &state->dap_data;
-    fprintf(stdout, "cmsis_dap_tcp: GPIOs: SWCLK=%d SWDIO=%d TDI=%d TDO=%d "
-            "NTRST=%d NRESET=%d LED=%d\n",
+    fprintf(stdout, "cmsis_dap_tcp %d: GPIOs: SWCLK=%d SWDIO=%d TDI=%d TDO=%d "
+            "NTRST=%d NRESET=%d LED=%d drive=%d\n", task_state->config->instance,
             config->gpio.swclk_tck, config->gpio.swdio_tms, config->gpio.tdi,
             config->gpio.tdo, config->gpio.ntrst, config->gpio.nreset,
-            config->gpio.led);
+            config->gpio.led, config->gpio.drive_strength);
     DAP_Setup();
 
 #ifdef CONFIG_LWIP_IPV6
@@ -387,7 +433,8 @@ void cmsis_dap_tcp_task(void *arg)
 
     listener_fd = socket(AF_INET6, SOCK_STREAM, 0);
     if(listener_fd < 0) {
-        perror("cmsis_dap_tcp: Failed to create listening socket.");
+        fprintf(stderr, "cmsis_dap_tcp %d: Failed to create listening "
+                "socket: %s\n", task_state->config->instance, strerror(errno));
         release_resources(resources_slot);
         free(state);
         vTaskDelete(NULL);
@@ -397,7 +444,8 @@ void cmsis_dap_tcp_task(void *arg)
     int no = 0;
     if (setsockopt(listener_fd, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(no)) <
             0) {
-        perror("cmsis_dap_tcp: failed to disable IPV6_V6ONLY for socket");
+        fprintf(stderr, "cmsis_dap_tcp %d: failed to disable IPV6_V6ONLY "
+                "for socket: %s\n", task_state->config->instance, strerror(errno));
     }
     LOG_DEBUG("Listening on IPv4/IPv6 socket.");
 #else
@@ -409,7 +457,8 @@ void cmsis_dap_tcp_task(void *arg)
 
     listener_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(listener_fd < 0) {
-        perror("cmsis_dap_tcp: Failed to create listening socket.");
+        fprintf(stderr, "cmsis_dap_tcp %d: Failed to create listening "
+                "socket: %s\n", task_state->config->instance, strerror(errno));
         release_resources(resources_slot);
         free(state);
         vTaskDelete(NULL);
@@ -422,7 +471,8 @@ void cmsis_dap_tcp_task(void *arg)
     setsockopt(listener_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
     if (bind(listener_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("cmsis_dap_tcp: failed to bind socket");
+        fprintf(stderr, "cmsis_dap_tcp %d: failed to bind socket: %s\n",
+                task_state->config->instance, strerror(errno));
         close(listener_fd);
         release_resources(resources_slot);
         free(state);
@@ -431,7 +481,8 @@ void cmsis_dap_tcp_task(void *arg)
     }
 
     if(listen(listener_fd, 1) < 0) {
-        perror("cmsis_dap_tcp: failed to listen on socket");
+        fprintf(stderr, "cmsis_dap_tcp %d: failed to listen on socket: %s\n",
+                task_state->config->instance, strerror(errno));
         close(listener_fd);
         release_resources(resources_slot);
         free(state);
@@ -440,13 +491,10 @@ void cmsis_dap_tcp_task(void *arg)
     }
 
     set_nonblocking(listener_fd);
-    fprintf(stdout, "cmsis_dap_tcp: maximum packet size is %d bytes.\n",
-            DAP_PKT_SIZE);
-    fprintf(stdout, "cmsis_dap_tcp: listening on port %d. GPIOs: SWCLK=%d "
-            "SWDIO=%d TDI=%d TDO=%d NTRST=%d NRESET=%d LED=%d\n",
-            config->port, config->gpio.swclk_tck, config->gpio.swdio_tms,
-            config->gpio.tdi, config->gpio.tdo, config->gpio.ntrst,
-            config->gpio.nreset, config->gpio.led);
+    fprintf(stdout, "cmsis_dap_tcp %d: maximum packet size is %d bytes.\n",
+            task_state->config->instance, DAP_PKT_SIZE);
+    fprintf(stdout, "cmsis_dap_tcp %d: listening on port %d.\n",
+            task_state->config->instance, config->port);
 
     msgbuf_init(&state->buf);
 
@@ -470,7 +518,8 @@ void cmsis_dap_tcp_task(void *arg)
         if (sel < 0) {
             if (errno == EINTR)
                 continue;
-            perror("cmsis_dap_tcp: select error");
+            fprintf(stderr, "cmsis_dap_tcp %d: select error: %s\n",
+                    task_state->config->instance, strerror(errno));
             break;
         }
 
@@ -483,13 +532,15 @@ void cmsis_dap_tcp_task(void *arg)
             if(new_fd < 0) {
                 if(errno != EAGAIN && errno != EWOULDBLOCK) {
                     // Just ignore error for now.
-                    perror("cmsis_dap_tcp: accept error");
+                    fprintf(stderr, "cmsis_dap_tcp %d: accept error: %s\n",
+                            task_state->config->instance, strerror(errno));
                 }
             }
             else {
                 if (client_fd >= 0) {
-                    fprintf(stderr, "cmsis_dap_tcp: dropping new connection. "
-                            "Another client is already connected.\n");
+                    fprintf(stderr, "cmsis_dap_tcp %d: dropping new "
+                            "connection. Another client is already "
+                            "connected.\n", task_state->config->instance);
                     close(new_fd);
                     continue;   // restart select() loop
                 }
@@ -512,8 +563,9 @@ void cmsis_dap_tcp_task(void *arg)
                     state->client_port = ntohs(s->sin6_port);
                 }
 #endif
-                fprintf(stdout, "cmsis_dap_tcp: client connected %s:%d\n",
-                        state->client_ip_str, state->client_port);
+                fprintf(stdout, "cmsis_dap_tcp %d: client connected %s:%d\n",
+                        task_state->config->instance, state->client_ip_str,
+                        state->client_port);
                 fcntl(new_fd, F_SETFL, O_NONBLOCK);
                 set_keepalives(new_fd, config);
                 client_fd = new_fd;
@@ -528,7 +580,8 @@ void cmsis_dap_tcp_task(void *arg)
             int add_ret = msgbuf_add(&state->buf, client_fd);
             if (add_ret < 0) {
                 if(add_ret != -ENOSPC) {
-                    fprintf(stdout, "cmsis_dap_tcp: client disconnected.\n");
+                    fprintf(stdout, "cmsis_dap_tcp %d: client disconnected.\n",
+                            task_state->config->instance);
                     close(client_fd);
                     client_fd = -1;
                     state->client_connected = false;
@@ -554,7 +607,8 @@ void cmsis_dap_tcp_task(void *arg)
                 // If we cannot process the request and response, just close
                 // the connection.
                 if(ret < 0) {
-                    fprintf(stdout, "cmsis_dap_tcp: disconnecting.\n");
+                    fprintf(stdout, "cmsis_dap_tcp %d: disconnecting.\n",
+                            task_state->config->instance);
                     close(client_fd);
                     client_fd = -1;
                     state->client_connected = false;
@@ -565,7 +619,7 @@ void cmsis_dap_tcp_task(void *arg)
         }
     }
 
-    fprintf(stdout, "cmsis_dap_tcp: shutting down.\n");
+    fprintf(stdout, "cmsis_dap_tcp %d: shutting down.\n", task_state->config->instance);
     state->client_connected = false;
 
     if (client_fd >= 0) close(client_fd);

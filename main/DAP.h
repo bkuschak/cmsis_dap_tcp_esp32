@@ -236,7 +236,8 @@
 typedef struct {
   uint8_t     debug_port;                       // Debug Port
   uint8_t     fast_clock;                       // Fast Clock Flag
-  uint8_t     padding[2];
+  volatile uint8_t transfer_abort;              // Transfer Abort Flag (added)
+  uint8_t     padding[1];
   uint32_t   clock_delay;                       // Clock Delay
   uint32_t     timestamp;                       // Last captured Timestamp
   struct {                                      // Transfer Configuration
@@ -266,7 +267,6 @@ typedef struct {
 } DAP_Data_t;
 
 extern          __thread DAP_Data_t *DAP_Data;            // DAP Data
-extern volatile __thread uint8_t     DAP_TransferAbort;   // Transfer Abort Flag
 
 
 #ifdef  __cplusplus

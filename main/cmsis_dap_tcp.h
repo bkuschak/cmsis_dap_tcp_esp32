@@ -5,20 +5,6 @@
 extern "C" {
 #endif
 
-//#define DEBUG_PRINTING
-
-#ifdef DEBUG_PRINTING
-#define LOG_DEBUG(...) \
-{ \
-    fprintf(stderr, "cmsis_dap_tcp: "); \
-    fprintf(stderr, ##__VA_ARGS__); \
-    fprintf(stderr, "\n"); \
-}
-
-#else
-#define LOG_DEBUG(...) { }
-#endif
-
 #include "DAP_gpio_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,6 +13,7 @@ extern "C" {
 #define CMSIS_DAP_TCP_TASK_PRIORITY 5
 
 struct cmsis_dap_tcp_config {
+    int instance;   // Used for identification in log messages only.
     int port;
     int disable_keepalive;
     int keepalive_timeout;

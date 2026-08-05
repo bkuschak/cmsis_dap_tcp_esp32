@@ -21,6 +21,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#if defined(CONFIG_ESP_PRINT_CPU_USAGE) && !defined(CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U64)
+#warning "CONFIG_ESP_PRINT_CPU_USAGE is enabled without FREERTOS_RUN_TIME_COUNTER_TYPE_U64 -- stats will overflow after ~71 minutes uptime"
+#endif
+
 
 /* Real time CPU usage display taken from:
  * https://github.com/espressif/esp-idf/blob/master/examples/system/freertos/real_time_stats/main/real_time_stats_example_main.c
