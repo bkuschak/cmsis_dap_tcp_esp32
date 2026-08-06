@@ -337,24 +337,17 @@ void uart_bridge_print_status(void)
                 &parity, &stop_bits_raw);
         int data_bits = data_bits_raw == UART_DATA_7_BITS ? 7 : 8;
         int stop_bits = stop_bits_raw == UART_STOP_BITS_2 ? 2 : 1;
+        fprintf(stdout, "UART bridge %d: UART%d, listening on port %d. "
+                "%d-%d-%s-%d. GPIOs: TX=%d RX=%d.\n",
+                snapshot[i].instance, snapshot[i].uart_num, snapshot[i].port,
+                baud_rate, data_bits, parity_str(parity), stop_bits,
+                snapshot[i].txd_pin, snapshot[i].rxd_pin);
         if (snapshot[i].client_connected) {
-            fprintf(stdout, "UART bridge %d: UART%d, port %d connected to "
-                    "'%s:%d'. GPIOs: TX=%d RX=%d. Bytes: TX=%lu RX=%lu. "
-                    "%d-%d-%s-%d\n",
-                    snapshot[i].instance, snapshot[i].uart_num, snapshot[i].port,
-                    snapshot[i].client_ip_str, snapshot[i].client_port,
-                    snapshot[i].txd_pin, snapshot[i].rxd_pin,
-                    snapshot[i].count_tx, snapshot[i].count_rx,
-                    baud_rate, data_bits,
-                    parity_str(parity), stop_bits);
-        } else {
-            fprintf(stdout, "UART bridge %d: UART%d, listening on port %d. "
-                    "GPIOs: TX=%d RX=%d. "
-                    "%d-%d-%s-%d\n",
-                    snapshot[i].instance, snapshot[i].uart_num, snapshot[i].port,
-                    snapshot[i].txd_pin, snapshot[i].rxd_pin,
-                    baud_rate, data_bits,
-                    parity_str(parity), stop_bits);
+            fprintf(stdout, "UART bridge %d: connected to client '%s:%d'. "
+                    "Bytes: TX=%lu RX=%lu.\n",
+                    snapshot[i].instance, snapshot[i].client_ip_str,
+                    snapshot[i].client_port, snapshot[i].count_tx,
+                    snapshot[i].count_rx);
         }
     }
     if (!any)

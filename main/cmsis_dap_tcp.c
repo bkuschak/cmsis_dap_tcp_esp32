@@ -313,6 +313,61 @@ static void release_resources(int slot)
     portEXIT_CRITICAL(&task_states_mux);
 }
 
+// Format only GPIOs that are actually assigned to this instance, with a
+// leading space: " SWCLK=0 SWDIO=1 TDI=9 TDO=10 NTRST=7 NRESET=2 LED=8".
+static void format_gpios(char *buf, size_t bufsize,
+        const struct cmsis_dap_gpio_config *gpio)
+{
+    struct { const char *name; int value; } pins[] = {
+        { "SWCLK",  gpio->swclk_tck },
+        { "SWDIO",  gpio->swdio_tms },
+        { "TDI",    gpio->tdi },
+        { "TDO",    gpio->tdo },
+        { "NTRST",  gpio->ntrst },
+        { "NRESET", gpio->nreset },
+        { "LED",    gpio->led },
+    };
+    size_t pos = 0;
+    buf[0] = '\0';
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+        if (pins[i].value < 0)
+            continue;
+        int n = snprintf(buf + pos, bufsize - pos, " %s=%d",
+                pins[i].name, pins[i].value);
+        if (n < 0 || (size_t)n >= bufsize - pos)
+            break;
+        pos += (size_t)n;
+    }
+}
+
+// "JTAG", "SWD", "JTAG/SWD", or "none" -- which protocols are actually
+// usable for this instance (compiled in AND this instance's pins are
+// valid). Same logic as DAP_SWD_AVAILABLE()/DAP_JTAG_AVAILABLE(), but
+// takes an explicit gpio config instead of relying on the thread-local
+// cmsis_dap_gpio_config, since cmsis_dap_print_status() runs from the
+// console task, not any instance's own task.
+static const char* protocol_str(const struct cmsis_dap_gpio_config *gpio)
+{
+    bool swd = (DAP_SWD != 0) && gpio->swclk_tck >= 0 && gpio->swdio_tms >= 0;
+    bool jtag = (DAP_JTAG != 0) && gpio->swclk_tck >= 0 && gpio->swdio_tms >= 0 &&
+            gpio->tdi >= 0 && gpio->tdo >= 0;
+    if (jtag && swd) return "JTAG/SWD";
+    if (jtag) return "JTAG";
+    if (swd) return "SWD";
+    return "none";
+}
+
+static const char* drive_strength_str(int drive_strength)
+{
+    switch (drive_strength) {
+        case 0: return "weakest";
+        case 1: return "weak";
+        case 2: return "medium";
+        case 3: return "strong";
+        default: return "unknown";
+    }
+}
+
 void cmsis_dap_print_status(void)
 {
     struct {
@@ -322,14 +377,7 @@ void cmsis_dap_print_status(void)
         int port;
         int client_port;
         char client_ip_str[MAX_INET_ADDRSTRLEN];
-        int swclk_tck;
-        int swdio_tms;
-        int tdi;
-        int tdo;
-        int ntrst;
-        int nreset;
-        int led;
-        int drive_strength;
+        struct cmsis_dap_gpio_config gpio;
     } snapshot[CMSIS_DAP_TCP_MAX_TASKS] = {0};
 
     // Snapshot under the lock, then print afterward -- printf() is too slow
@@ -346,14 +394,7 @@ void cmsis_dap_print_status(void)
         snapshot[i].client_port = state->client_port;
         memcpy(snapshot[i].client_ip_str, state->client_ip_str,
                 sizeof(snapshot[i].client_ip_str));
-        snapshot[i].swclk_tck = state->config->gpio.swclk_tck;
-        snapshot[i].swdio_tms = state->config->gpio.swdio_tms;
-        snapshot[i].tdi = state->config->gpio.tdi;
-        snapshot[i].tdo = state->config->gpio.tdo;
-        snapshot[i].ntrst = state->config->gpio.ntrst;
-        snapshot[i].nreset = state->config->gpio.nreset;
-        snapshot[i].led = state->config->gpio.led;
-        snapshot[i].drive_strength = state->config->gpio.drive_strength;
+        snapshot[i].gpio = state->config->gpio;
     }
     portEXIT_CRITICAL(&task_states_mux);
 
@@ -361,19 +402,18 @@ void cmsis_dap_print_status(void)
         if (!snapshot[i].active)
             continue;
 
-        printf("cmsis_dap_tcp %d: GPIOs: SWCLK=%d SWDIO=%d TDI=%d TDO=%d "
-                "NTRST=%d NRESET=%d LED=%d drive=%d\n", snapshot[i].instance,
-                snapshot[i].swclk_tck, snapshot[i].swdio_tms, snapshot[i].tdi,
-                snapshot[i].tdo, snapshot[i].ntrst, snapshot[i].nreset,
-                snapshot[i].led, snapshot[i].drive_strength);
+        char gpio_str[80];
+        format_gpios(gpio_str, sizeof(gpio_str), &snapshot[i].gpio);
+        const char *proto = protocol_str(&snapshot[i].gpio);
+        const char *drive = drive_strength_str(snapshot[i].gpio.drive_strength);
 
+        printf("cmsis_dap_tcp %d: %s, port %d. GPIO (%s):%s\n",
+                snapshot[i].instance, proto, snapshot[i].port, drive,
+                gpio_str);
         if (snapshot[i].client_connected) {
-            printf("cmsis_dap_tcp %d: listening on port %d, connected to "
-                    "client '%s:%d'.\n", snapshot[i].instance, snapshot[i].port,
-                    snapshot[i].client_ip_str, snapshot[i].client_port);
-        } else {
-            printf("cmsis_dap_tcp %d: listening on port %d.\n",
-                    snapshot[i].instance, snapshot[i].port);
+            printf("cmsis_dap_tcp %d: connected to client '%s:%d'.\n",
+                    snapshot[i].instance, snapshot[i].client_ip_str,
+                    snapshot[i].client_port);
         }
     }
 }
@@ -416,11 +456,8 @@ void cmsis_dap_tcp_task(void *arg)
 
     cmsis_dap_gpio_config = &config->gpio;
     DAP_Data = &state->dap_data;
-    fprintf(stdout, "cmsis_dap_tcp %d: GPIOs: SWCLK=%d SWDIO=%d TDI=%d TDO=%d "
-            "NTRST=%d NRESET=%d LED=%d drive=%d\n", task_state->config->instance,
-            config->gpio.swclk_tck, config->gpio.swdio_tms, config->gpio.tdi,
-            config->gpio.tdo, config->gpio.ntrst, config->gpio.nreset,
-            config->gpio.led, config->gpio.drive_strength);
+    char gpio_str[80];
+    format_gpios(gpio_str, sizeof(gpio_str), &config->gpio);
     DAP_Setup();
 
 #ifdef CONFIG_LWIP_IPV6
@@ -491,10 +528,10 @@ void cmsis_dap_tcp_task(void *arg)
     }
 
     set_nonblocking(listener_fd);
-    fprintf(stdout, "cmsis_dap_tcp %d: maximum packet size is %d bytes.\n",
-            task_state->config->instance, DAP_PKT_SIZE);
-    fprintf(stdout, "cmsis_dap_tcp %d: listening on port %d.\n",
-            task_state->config->instance, config->port);
+    fprintf(stdout, "cmsis_dap_tcp %d: %s, port %d. GPIO (%s):%s\n",
+            task_state->config->instance, protocol_str(&config->gpio),
+            config->port, drive_strength_str(config->gpio.drive_strength),
+            gpio_str);
 
     msgbuf_init(&state->buf);
 
