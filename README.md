@@ -15,9 +15,9 @@ board.
 
 ![diagram](img/cmsis_dap_tcp_diagram.svg)
 
-- Tested with the XIAO ESP32C6 and ESP32-S3-DevKitC-1 development boards as the
-  programmer, and STM32F103 Blue Pill and Nucleo STM32F401RE as the targets.
-  A Lattice FPGA target has also been successfully used.
+- Tested with ESP32 S3, C3, and C6 boards as programmer and several STM32
+  development boards (F4xx, F103, G0xx) as targets. A Lattice ECP5 FPGA target
+  has also been used successfully.
 - Either JTAG mode or SWD mode can be used to program the target. 2 GPIO are
   needed for SWD, or a minimum of 4 GPIO for JTAG.
 - An optional GPIO pin can be used to drive the NRST# (SRST) signal, but this
@@ -28,9 +28,11 @@ board.
   RGB LED).
 - UART to TCP/IP bridge can be enabled to provide access to the target board's
   serial console remotely, using an ESP32 UART.
+- Up to 3 independent JTAG/SWD interfaces can be supported simultaneously.
+- Up to 3 independent UART bridges can be supported simultaneously.
 - Typical performance:
-  - Reading / writing SRAM: up to 200 KB/sec
-  - Flashing a 512 KB firmware image to the STM32F401RE
+  - SWD reading / writing SRAM: up to 200 KB/sec
+  - SWD flashing a 512 KB firmware image to the STM32F401RE
   completes in about 13.4 seconds, including erase, program, and verify (with 4
   to 8 seconds of that time used for flash erasure). The Blue Pill takes about
   6 seconds for a 64KB image.
@@ -66,7 +68,8 @@ commit 1fd47bed772ea40923472c90dfe11516e76033ee (HEAD -> main, tag: v2.1.2, orig
 The software has some limitations:
 
 - SWO is currently unsupported.
-- Maximum clock rate is ~5 MHz and duty cycle can vary from ~33% to ~66%.
+- Maximum clock rate is ~6 MHz and duty cycle can vary from ~33% to ~66%.
+- JTAG is significantly slower than SWD due to the way OpenOCD works.
 
 # Building and Flashing the Firmware
 
@@ -116,31 +119,33 @@ Then proceed with the build and installation:
 idf.py fullclean menuconfig build flash
 ```
 
-In menuconfig, goto to the "CMSIS-DAP configuration" page.
+* In menuconfig, goto to the "CMSIS-DAP configuration" page.
+
+  <img src="img/menuconfig1.png" width="75%" />
 
 * Hardcoded WiFi credentials can be configured on the "WiFi configuration"
   subpage.  (If you are not using WPA2, you might need to adjust the WiFi Scan
-  auth mode threshold).
+  auth mode threshold). WiFi credentials can also be changed at runtime using
+  the ```wifi``` console command, and these will be stored in flash memory.
 
-* There is an option to allow runtime configuration of the WiFi credentials
-  using the USB serial console, and these will be stored in flash memory.
-
-  <img src="img/menuconfig1.png" width="75%" />
-  <br><br>
   <img src="img/menuconfig2.png" width="75%" />
 
 * If needed, you can change the GPIO port pins for JTAG, SWD, reset, and LED on
   the "GPIO number assignments" subpage. The signals can be disabled if they
-  are not needed.
+  are not needed. Up to 3 indepedent CMSIS-DAP interfaces can be enabled, if
+  enough pins are available. Drive strength for the JTAG/SWD pins can be
+  changed. The weakest drive is selected by default to minimize the effects of
+  crosstalk and ringing when using cables.
 
   <img src="img/menuconfig3.png" width="75%" />
 
 * If you want to use the UART to TCP/IP bridge, it can be configured on the
-  the "UART to TCP/IP bridge" subpage. (Currently, the baud rate and other
-  settings cannot be changed at runtime). A script ```host/uart_bridge.sh```
-  is provided that uses ```socat``` to present the remote UART as a pseudo-tty
-  that can be opened using any serial terminal program on the host. The UART
-  bridge uses UART1 by default.
+  the "UART to TCP/IP bridge" subpage. The baud rate and other default
+  settings can be changed at runtime using the ```uart``` console command. A
+  script ```host/uart_bridge.sh``` is provided that uses ```socat``` to present
+  the remote UART as a pseudo-tty that can be opened using any serial terminal
+  program on the host. The first UART bridge uses UART1 by default. Up to 3
+  independent UART bridges can be enabled, if enough UARTs are available.
 
   <img src="img/menuconfig4.png" width="75%" />
 
@@ -154,14 +159,13 @@ In menuconfig, goto to the "CMSIS-DAP configuration" page.
    ```
    Component config → ESP System Settings → Channel for console output → Default UART
    Component config → ESP System Settings → Channel for console secondary output → No secondary
-   Component config → UART Bridge → Select GPIO numbers → enabled
-   Component config → UART Bridge → UART TX → (choose an available GPIO)
-   Component config → UART Bridge → UART RX → (choose an available GPIO)
+   CMSIS-DAP config → UART Bridge → Select GPIO numbers → enabled
+   CMSIS-DAP config → UART Bridge → UART TX → (choose an available GPIO)
+   CMSIS-DAP config → UART Bridge → UART RX → (choose an available GPIO)
    ```
 
-If you want to support multiple independent JTAG/SWD interfaces, or use this
-code as component in another application see [this
-section](#multiple-interfaces--usage-as-a-component) below.
+If you want to use this code as a component in another application see [this
+section](#usage-as-a-component) below.
 
 If you experience problems, additional debugging messages can be enabled in
 menuconfig. This will impact performance.
@@ -186,6 +190,7 @@ esp32> help
 Available commands:
   help - Show this help message.
   wifi "<ssid>" "<password>" [auth_mode] - Configure WiFi credentials.
+  uart <instance> <baud_rate> <data_bits> <parity> <stop_bits> - Configure UART bridge settings.
   reboot - Restart the device.
   status - Report network status.
 esp32>
@@ -228,36 +233,35 @@ You should see something like this from the ESP32:
 
 ```
 CMSIS-DAP TCP running on ESP32
-ESP-IDF version: v6.0-dev-1489-g4e036983a7
-Hardware version: esp32s3 with 2 CPU core(s), WiFi/BLE, silicon revision v0.2, 2MB external flash
-Minimum free heap size: 337312 bytes
-MAC address: E4B323B60EB4
+ESP-IDF version: v6.0.2
+Hardware version: esp32c3 with 1 CPU core(s), WiFi/BLE, silicon revision v0.4, 2MB external flash
+Minimum free heap size: 281772 bytes
+MAC address: 70AF0912F000
 Enabling console commands.
-Type 'help' to get the list of commands.
-Use UP/DOWN arrows to navigate through command history.
-Press TAB when typing command name to auto-complete.
-Using WiFi credentials from flash.
 Attempting to connect to WiFi SSID: 'SomeWifiRouter'
-Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -75 dBm
-IP address: 192.168.1.107
+Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -61 dBm
+IP address: 192.168.0.198
 Disabling WiFi power savings to improve performance.
-cmsis_dap_tcp: listening on port 4441.
-UART bridge: remapping UART1 TX = GPIO_NUM_16, RX = GPIO_NUM_15.
-UART bridge: listening on port 4442 for UART1.
-IPv6 address (link-local): fe80:0000:0000:0000:9aa3:16ff:feec:6640
-IPv6 address (global): 2406:3400:031f:ba10:9aa3:16ff:feec:6640
+cmsis_dap_tcp 1: JTAG/SWD, port 4441. GPIO (weakest): SWCLK=0 SWDIO=1 TDI=9 TDO=10 NTRST=7 NRESET=2 LED=8
+cmsis_dap_tcp 2: SWD, port 4443. GPIO (weakest): SWCLK=3 SWDIO=4
+cmsis_dap_tcp 3: SWD, port 4445. GPIO (weakest): SWCLK=6 SWDIO=5
+UART bridge 1: using UART1 settings from flash: 115200-8-N-1
+UART bridge 1: UART1, listening on port 4442. GPIOs: TX=21 RX=20
+IPv6 address (link-local): fe80:0000:0000:0000:72af:09ff:fe12:f000
 ```
 
 You can check the network status at any time by using the status command:
 
 ```
-esp32> status
+esp32>  status
 Connected to WiFi SSID: 'SomeWifiRouter'. RSSI: -61 dBm
-IP address: 192.168.1.107
-IPv6 address (link-local): fe80:0000:0000:0000:9aa3:16ff:feec:6640
-IPv6 address (global): 2406:3400:031f:ba10:9aa3:16ff:feec:6640
-cmsis_dap_tcp: listening on port 4441.
-UART bridge: listening on port 4442 for UART1.
+IP address: 192.168.0.198
+IPv6 address (link-local): fe80:0000:0000:0000:72af:09ff:fe12:f000
+cmsis_dap_tcp 1: JTAG/SWD, port 4441. GPIO (weakest): SWCLK=0 SWDIO=1 TDI=9 TDO=10 NTRST=7 NRESET=2 LED=8
+cmsis_dap_tcp 2: SWD, port 4443. GPIO (weakest): SWCLK=3 SWDIO=4
+cmsis_dap_tcp 3: SWD, port 4445. GPIO (weakest): SWCLK=6 SWDIO=5
+UART bridge 1: UART1, listening on port 4442. 115200-8-N-1. GPIOs: TX=21 RX=20.
+UART bridge 1: connected to client '192.168.0.55:63381'. Bytes: TX=2759 RX=32454.
 ```
 
 # Building and Running OpenOCD
@@ -509,25 +513,18 @@ user    0m0.052s
 sys     0m0.155s
 ```
 
-# Multiple interfaces / usage as a component
+# Usage as a component
 
 Two additional features were added by [@w531t4](https://github.com/w531t4) and
 integrated into the project. Thank you!
 
-1) This cmsis_dap_tcp server may be incorporated as a component in another
+This cmsis_dap_tcp server may be incorporated as a component in another
 application.  Simply define your CMAKE_PROJECT_NAME as something other than
 “cmsis_dap_tcp_esp32”.  This will cause ```main.c``` to be left out of the
 project.  Replace the functionality of ```main.c``` with your own
 implementation.  Be sure to call ```cmsis_dap_tcp_start(&config,
 "cmsis_dap_tcp_task", …)``` and pass a valid ```cmsis_dap_tcp_config```
-structure to define the interface.
+structure to define each interface.
 
-2) A single ESP32 can support multiple independent JTAG/SWD and UART
-interfaces. Each one has its own GPIO pins and TCP port. This can be useful you
-have multiple CPUs, MCUs, FPGAs on a board with separate JTAG chains. To do
-this, use feature #1 above and call ```cmsis_dap_tcp_start()``` once for each
-interface.  Pass a valid ```cmsis_dap_tcp_config``` parameter to define the
-GPIO pin configuration for each interface.  If you’re using the UART bridge,
-call ```uart_bridge_start()``` once for each bridge. Pass a valid
-```uart_bridge_config``` parameter to define each interface.
-
+Also, an ESPHome wrapper is available
+[here](https://github.com/w531t4/ESPHome-cmsis_dap_tcp_esp32-Wrapper).
