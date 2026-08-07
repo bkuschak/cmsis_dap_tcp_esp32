@@ -1,6 +1,10 @@
-# Fetch the Git Hash
+# Fetch the Git Hash.
+# Clear any inherited GIT_CEILING_DIRECTORIES so git can find the enclosing
+# repo, which is needed when building under ESPHome.
 execute_process(
-    COMMAND git log -1 --format=%h
+    COMMAND
+        ${CMAKE_COMMAND} -E env "GIT_CEILING_DIRECTORIES="
+        git log -1 --format=%h
     OUTPUT_VARIABLE GIT_HASH
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
@@ -8,7 +12,9 @@ execute_process(
 
 # Fetch the Git Author Date with seconds
 execute_process(
-    COMMAND git log -1 --format=%ad --date=format:%Y-%m-%d\ %H:%M:%S
+    COMMAND
+        ${CMAKE_COMMAND} -E env "GIT_CEILING_DIRECTORIES="
+        git log -1 --format=%ad --date=format:%Y-%m-%d\ %H:%M:%S
     OUTPUT_VARIABLE GIT_DATE
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
@@ -16,7 +22,9 @@ execute_process(
 
 # Check for tracked file changes (-uno)
 execute_process(
-    COMMAND git status --porcelain -uno
+    COMMAND
+        ${CMAKE_COMMAND} -E env "GIT_CEILING_DIRECTORIES="
+        git status --porcelain -uno
     OUTPUT_VARIABLE GIT_STATUS_OUT
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
