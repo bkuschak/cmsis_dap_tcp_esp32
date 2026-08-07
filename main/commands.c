@@ -4,10 +4,16 @@
  *
  * Console commands: registration, argument parsing, and handlers. Runs the
  * REPL over whichever transport CONFIG_ESP_CONSOLE_* selects.
+ *
+ * Handlers take a struct command_context (I/O stream, argtable instances)
+ * via func_w_context/context instead of reading module-level globals, so
+ * they're reusable by a future second caller with its own context.
  */
 
+#include <assert.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <inttypes.h>
@@ -36,6 +42,49 @@
 extern void reboot(void);
 extern volatile bool wifi_connected;
 extern const char *wifi_ssid;
+
+// Per-caller state: currently only ever one instance (the serial
+// console's, created once at boot in commands_init() and registered
+// once). Each caller owns its own argtable instances, so arg_parse() is
+// never shared across concurrent callers.
+enum command_transport {
+    COMMAND_TRANSPORT_SERIAL,
+};
+
+struct command_context {
+    FILE *out;
+    enum command_transport transport;
+
+    struct {
+        struct arg_str *ssid;
+        struct arg_str *password;
+        struct arg_str *auth_mode;
+        struct arg_end *end;
+    } wifi_args;
+
+#if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
+    struct {
+        struct arg_int *instance;
+        struct arg_int *baud_rate;
+        struct arg_int *data_bits;
+        struct arg_str *parity;
+        struct arg_int *stop_bits;
+        struct arg_end *end;
+    } uart_args;
+#endif
+
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    struct {
+        struct arg_int *gpio;
+        struct arg_int *output_sps;
+        struct arg_int *averaging;
+        struct arg_str *format;
+        struct arg_end *end;
+    } adc_args;
+#endif
+};
 
 #define NVS_NAMESPACE           "wifi_config"
 #define NVS_KEY_SSID            "ssid"
@@ -152,29 +201,22 @@ bool commands_get_stored_wifi_credentials(const char **ssid,
     return true;
 }
 
-// WiFi command argument structure.
-static struct {
-    struct arg_str *ssid;
-    struct arg_str *password;
-    struct arg_str *auth_mode;
-    struct arg_end *end;
-} wifi_args;
-
-static int wifi_cmd_handler(int argc, char **argv)
+static int wifi_cmd_handler(void *context, int argc, char **argv)
 {
-    FILE *out = stdout;
-    int nerrors = arg_parse(argc, argv, (void **) &wifi_args);
+    struct command_context *ctx = context;
+    FILE *out = ctx->out;
+    int nerrors = arg_parse(argc, argv, (void **) &ctx->wifi_args);
     if (nerrors != 0) {
-        arg_print_errors(out, wifi_args.end, argv[0]);
+        arg_print_errors(out, ctx->wifi_args.end, argv[0]);
         fprintf(out, "Usage: wifi \"<ssid>\" \"<password>\" [auth_mode]\n");
         fprintf(out, "  auth_mode: open, wep, wpa, wpa2, wpa3 (default: wpa2)\n");
         return 1;
     }
 
-    const char* ssid = wifi_args.ssid->sval[0];
-    const char* password = wifi_args.password->sval[0];
-    const char* auth_mode_str = wifi_args.auth_mode->count > 0 ?
-        wifi_args.auth_mode->sval[0] : "wpa2";
+    const char* ssid = ctx->wifi_args.ssid->sval[0];
+    const char* password = ctx->wifi_args.password->sval[0];
+    const char* auth_mode_str = ctx->wifi_args.auth_mode->count > 0 ?
+        ctx->wifi_args.auth_mode->sval[0] : "wpa2";
 
     // Check for empty SSID. If empty, clear stored credentials.
     if (strlen(ssid) == 0) {
@@ -224,16 +266,6 @@ static int wifi_cmd_handler(int argc, char **argv)
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
 
-// UART command argument structure.
-static struct {
-    struct arg_int *instance;
-    struct arg_int *baud_rate;
-    struct arg_int *data_bits;
-    struct arg_str *parity;
-    struct arg_int *stop_bits;
-    struct arg_end *end;
-} uart_args;
-
 // Map a UART bridge instance number (1/2/3) to the physical UART peripheral
 // number it's configured to use. Returns -1 if that instance doesn't exist
 // or isn't enabled.
@@ -267,12 +299,13 @@ static bool parse_uart_parity(const char* parity_str, uart_parity_t* out)
     return true;
 }
 
-static int uart_cmd_handler(int argc, char **argv)
+static int uart_cmd_handler(void *context, int argc, char **argv)
 {
-    FILE *out = stdout;
-    int nerrors = arg_parse(argc, argv, (void **) &uart_args);
+    struct command_context *ctx = context;
+    FILE *out = ctx->out;
+    int nerrors = arg_parse(argc, argv, (void **) &ctx->uart_args);
     if (nerrors != 0) {
-        arg_print_errors(out, uart_args.end, argv[0]);
+        arg_print_errors(out, ctx->uart_args.end, argv[0]);
         fprintf(out, "Usage: uart <instance> <baud_rate> <data_bits> <parity> "
                 "<stop_bits>\n");
         fprintf(out, "  instance: which UART bridge to configure (1, 2, or 3)\n");
@@ -284,11 +317,11 @@ static int uart_cmd_handler(int argc, char **argv)
         return 1;
     }
 
-    int instance = uart_args.instance->ival[0];
-    int baud_rate = uart_args.baud_rate->ival[0];
-    int data_bits = uart_args.data_bits->ival[0];
-    const char* parity_str = uart_args.parity->sval[0];
-    int stop_bits = uart_args.stop_bits->ival[0];
+    int instance = ctx->uart_args.instance->ival[0];
+    int baud_rate = ctx->uart_args.baud_rate->ival[0];
+    int data_bits = ctx->uart_args.data_bits->ival[0];
+    const char* parity_str = ctx->uart_args.parity->sval[0];
+    int stop_bits = ctx->uart_args.stop_bits->ival[0];
 
     int uart_num = uart_bridge_instance_to_uart_num(instance);
     if (uart_num < 0) {
@@ -364,15 +397,6 @@ static int uart_cmd_handler(int argc, char **argv)
 #endif
 
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
-// ADC stream command argument structure.
-static struct {
-    struct arg_int *gpio;
-    struct arg_int *output_sps;
-    struct arg_int *averaging;
-    struct arg_str *format;
-    struct arg_end *end;
-} adc_args;
-
 static bool parse_adc_format(const char* format_str, enum adc_stream_format* out)
 {
     if (strcasecmp(format_str, "text") == 0) {
@@ -387,12 +411,13 @@ static bool parse_adc_format(const char* format_str, enum adc_stream_format* out
     return false;
 }
 
-static int adc_cmd_handler(int argc, char **argv)
+static int adc_cmd_handler(void *context, int argc, char **argv)
 {
-    FILE *out = stdout;
-    int nerrors = arg_parse(argc, argv, (void **) &adc_args);
+    struct command_context *ctx = context;
+    FILE *out = ctx->out;
+    int nerrors = arg_parse(argc, argv, (void **) &ctx->adc_args);
     if (nerrors != 0) {
-        arg_print_errors(out, adc_args.end, argv[0]);
+        arg_print_errors(out, ctx->adc_args.end, argv[0]);
         fprintf(out, "Usage: adc <gpio> <output_sps> <averaging> <format>\n");
         fprintf(out, "  averaging: power of 2 from 1 to 1024 (1 = no averaging)\n");
         fprintf(out, "  format: text or binary16\n");
@@ -401,10 +426,10 @@ static int adc_cmd_handler(int argc, char **argv)
         return 1;
     }
 
-    int gpio = adc_args.gpio->ival[0];
-    int output_sps = adc_args.output_sps->ival[0];
-    int averaging = adc_args.averaging->ival[0];
-    const char* format_str = adc_args.format->sval[0];
+    int gpio = ctx->adc_args.gpio->ival[0];
+    int output_sps = ctx->adc_args.output_sps->ival[0];
+    int averaging = ctx->adc_args.averaging->ival[0];
+    const char* format_str = ctx->adc_args.format->sval[0];
 
     // An output rate of 0 clears the stored settings. (gpio can't double as
     // the sentinel -- GPIO0 is a valid, already-default pin.)
@@ -466,10 +491,10 @@ static int adc_cmd_handler(int argc, char **argv)
 }
 #endif
 
-static int reboot_cmd_handler(int argc, char **argv)
+static int reboot_cmd_handler(void *context, int argc, char **argv)
 {
-    FILE *out = stdout;
-    fprintf(out, "Rebooting...\n");
+    struct command_context *ctx = context;
+    fprintf(ctx->out, "Rebooting...\n");
     reboot();   // Does not return.
     return 0;
 }
@@ -489,9 +514,10 @@ static const char* ipv6_type_str(esp_ip6_addr_type_t type)
 }
 #endif
 
-static int status_cmd_handler(int argc, char **argv)
+static int status_cmd_handler(void *context, int argc, char **argv)
 {
-    FILE *out = stdout;
+    struct command_context *ctx = context;
+    FILE *out = ctx->out;
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
 
     if (netif == NULL) {
@@ -552,9 +578,10 @@ static int status_cmd_handler(int argc, char **argv)
     return 0;
 }
 
-static int help_cmd_handler(int argc, char **argv)
+static int help_cmd_handler(void *context, int argc, char **argv)
 {
-    FILE *out = stdout;
+    struct command_context *ctx = context;
+    FILE *out = ctx->out;
     fprintf(out, "Available commands:\n");
     fprintf(out, "  help - Show this help message.\n");
     fprintf(out, "  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure WiFi "
@@ -572,6 +599,53 @@ static int help_cmd_handler(int argc, char **argv)
     fprintf(out, "  reboot - Restart the device.\n");
     fprintf(out, "  status - Report network status.\n");
     return 0;
+}
+
+static struct command_context *command_context_create(enum command_transport transport,
+        FILE *out)
+{
+    struct command_context *ctx = calloc(1, sizeof(*ctx));
+    if (ctx == NULL)
+        return NULL;
+    ctx->out = out;
+    ctx->transport = transport;
+
+    ctx->wifi_args.ssid = arg_str1(NULL, NULL, "<ssid>", "WiFi network SSID");
+    ctx->wifi_args.password =
+        arg_str1(NULL, NULL, "<password>", "WiFi network password");
+    ctx->wifi_args.auth_mode =
+        arg_str0(NULL, NULL, "[auth_mode]", "Authentication mode: open, wep, "
+                "wpa, wpa2, wpa3");
+    ctx->wifi_args.end = arg_end(3);
+
+#if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
+    ctx->uart_args.instance = arg_int1(NULL, NULL, "<instance>",
+            "Which UART bridge to configure (1, 2, or 3)");
+    ctx->uart_args.baud_rate = arg_int1(NULL, NULL, "<baud_rate>",
+            "UART baud rate (0 clears stored settings)");
+    ctx->uart_args.data_bits = arg_int1(NULL, NULL, "<data_bits>",
+            "Data bits: 7 or 8");
+    ctx->uart_args.parity = arg_str1(NULL, NULL, "<parity>",
+            "Parity: n, e, o (case-insensitive)");
+    ctx->uart_args.stop_bits = arg_int1(NULL, NULL, "<stop_bits>",
+            "Stop bits: 1 or 2");
+    ctx->uart_args.end = arg_end(5);
+#endif
+
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    ctx->adc_args.gpio = arg_int1(NULL, NULL, "<gpio>", "ADC1 input GPIO");
+    ctx->adc_args.output_sps = arg_int1(NULL, NULL, "<output_sps>",
+            "Output sample rate in Hz (0 clears stored settings)");
+    ctx->adc_args.averaging = arg_int1(NULL, NULL, "<averaging>",
+            "Averaging count: power of 2, 1-1024");
+    ctx->adc_args.format = arg_str1(NULL, NULL, "<format>",
+            "Output format: text or binary16");
+    ctx->adc_args.end = arg_end(4);
+#endif
+
+    return ctx;
 }
 
 void commands_init(void)
@@ -609,48 +683,42 @@ void commands_init(void)
     // some terminals it shows up as garbage characters instead. Disable it.
     linenoiseSetHintsCallback(NULL);
 
+    // One context for the serial console's entire lifetime, registered
+    // below and never touched again.
+    struct command_context *ctx =
+        command_context_create(COMMAND_TRANSPORT_SERIAL, stdout);
+    assert(ctx);
+
     // Register commands.
     const esp_console_cmd_t help_cmd = {
         .command = "help",
         .help = "Show available commands",
-        .hint = NULL,
-        .func = &help_cmd_handler,
-        .argtable = NULL
+        .func_w_context = help_cmd_handler,
+        .context = ctx,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&help_cmd));
 
     const esp_console_cmd_t reboot_cmd = {
         .command = "reboot",
         .help = "Restart the device",
-        .hint = NULL,
-        .func = &reboot_cmd_handler,
-        .argtable = NULL
+        .func_w_context = reboot_cmd_handler,
+        .context = ctx,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&reboot_cmd));
 
     const esp_console_cmd_t status_cmd = {
         .command = "status",
         .help = "Show device status",
-        .hint = NULL,
-        .func = &status_cmd_handler,
-        .argtable = NULL
+        .func_w_context = status_cmd_handler,
+        .context = ctx,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&status_cmd));
-
-    wifi_args.ssid = arg_str1(NULL, NULL, "<ssid>", "WiFi network SSID");
-    wifi_args.password =
-        arg_str1(NULL, NULL, "<password>", "WiFi network password");
-    wifi_args.auth_mode =
-        arg_str0(NULL, NULL, "[auth_mode]", "Authentication mode: open, wep, "
-                "wpa, wpa2, wpa3");
-    wifi_args.end = arg_end(3);
 
     const esp_console_cmd_t wifi_cmd = {
         .command = "wifi",
         .help = "Configure WiFi credentials",
-        .hint = NULL,
-        .func = &wifi_cmd_handler,
-        .argtable = &wifi_args
+        .func_w_context = wifi_cmd_handler,
+        .context = ctx,
     };
     printf("Enabling console commands.\n");
     ESP_ERROR_CHECK(esp_console_cmd_register(&wifi_cmd));
@@ -658,44 +726,21 @@ void commands_init(void)
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
-    uart_args.instance = arg_int1(NULL, NULL, "<instance>",
-            "Which UART bridge to configure (1, 2, or 3)");
-    uart_args.baud_rate = arg_int1(NULL, NULL, "<baud_rate>",
-            "UART baud rate (0 clears stored settings)");
-    uart_args.data_bits = arg_int1(NULL, NULL, "<data_bits>",
-            "Data bits: 7 or 8");
-    uart_args.parity = arg_str1(NULL, NULL, "<parity>",
-            "Parity: n, e, o (case-insensitive)");
-    uart_args.stop_bits = arg_int1(NULL, NULL, "<stop_bits>",
-            "Stop bits: 1 or 2");
-    uart_args.end = arg_end(5);
-
     const esp_console_cmd_t uart_cmd = {
         .command = "uart",
         .help = "Configure UART bridge settings",
-        .hint = NULL,
-        .func = &uart_cmd_handler,
-        .argtable = &uart_args
+        .func_w_context = uart_cmd_handler,
+        .context = ctx,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&uart_cmd));
 #endif
 
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
-    adc_args.gpio = arg_int1(NULL, NULL, "<gpio>", "ADC1 input GPIO");
-    adc_args.output_sps = arg_int1(NULL, NULL, "<output_sps>",
-            "Output sample rate in Hz (0 clears stored settings)");
-    adc_args.averaging = arg_int1(NULL, NULL, "<averaging>",
-            "Averaging count: power of 2, 1-1024");
-    adc_args.format = arg_str1(NULL, NULL, "<format>",
-            "Output format: text or binary16");
-    adc_args.end = arg_end(4);
-
     const esp_console_cmd_t adc_cmd = {
         .command = "adc",
         .help = "Configure ADC streaming settings",
-        .hint = NULL,
-        .func = &adc_cmd_handler,
-        .argtable = &adc_args
+        .func_w_context = adc_cmd_handler,
+        .context = ctx,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&adc_cmd));
 #endif
