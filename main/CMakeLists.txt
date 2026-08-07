@@ -27,6 +27,10 @@ if(CONFIG_ESP_ADC_STREAM_ENABLED)
     list(APPEND PRIV_REQUIRES "esp_adc")
 endif()
 
+if(CONFIG_ESP_WIFI_CONSOLE_COMMANDS)
+    list(APPEND COMPONENT_SRCS "commands.c")
+endif()
+
 if(CONFIG_ESP_PRINT_CPU_USAGE)
     list(APPEND COMPONENT_SRCS "cpu_usage.c")
 endif()
