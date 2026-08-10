@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdio.h>
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -31,7 +32,7 @@ struct adc_stream_config {
 BaseType_t adc_stream_start(const struct adc_stream_config *config,
         const char *task_name, TaskHandle_t *handle);
 
-void adc_stream_print_status(void);
+void adc_stream_print_status(FILE *out);
 
 // Persist runtime-configurable settings (GPIO, output rate, averaging,
 // format) to flash. Takes effect on the next TCP client connection, not

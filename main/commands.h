@@ -5,17 +5,14 @@
 extern "C" {
 #endif
 
-#include "esp_wifi_types_generic.h"
+#include <stdio.h>
 
-// Sets up the console (REPL over whichever transport CONFIG_ESP_CONSOLE_*
-// selects) and registers all commands. Starts the REPL running.
-void commands_init(void);
+// Set up the serial console and start it running.
+void commands_init_serial(void);
 
-// Returns true and fills in the stored WiFi credentials if valid ones were
-// previously saved via the 'wifi' console command, false otherwise (caller
-// should fall back to its own CONFIG defaults).
-bool commands_get_stored_wifi_credentials(const char **ssid,
-        const char **password, wifi_auth_mode_t *auth_mode);
+// Runs one socket console connection's REPL until the peer disconnects.
+// f is the fdopen()ed connection stream; caller owns it.
+void process_socket_commands(FILE *f);
 
 #ifdef __cplusplus
 }

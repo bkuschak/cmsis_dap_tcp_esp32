@@ -2,3 +2,6 @@ dependencies:
   # Support for WS2812 RGB LED on some boards.
   espressif/led_strip:
     version: "^3.0.3"
+  # Reentrant, multi-instance line editing for the TCP console.
+  espressif/esp_linenoise:
+    version: "^1.0.0"

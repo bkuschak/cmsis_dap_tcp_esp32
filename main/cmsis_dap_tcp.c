@@ -368,7 +368,7 @@ static const char* drive_strength_str(int drive_strength)
     }
 }
 
-void cmsis_dap_print_status(void)
+void cmsis_dap_print_status(FILE *out)
 {
     struct {
         bool active;
@@ -407,11 +407,11 @@ void cmsis_dap_print_status(void)
         const char *proto = protocol_str(&snapshot[i].gpio);
         const char *drive = drive_strength_str(snapshot[i].gpio.drive_strength);
 
-        printf("cmsis_dap_tcp %d: %s, port %d. GPIO (%s):%s\n",
+        fprintf(out, "cmsis_dap_tcp %d: %s, port %d. GPIO (%s):%s\n",
                 snapshot[i].instance, proto, snapshot[i].port, drive,
                 gpio_str);
         if (snapshot[i].client_connected) {
-            printf("cmsis_dap_tcp %d: connected to client '%s:%d'.\n",
+            fprintf(out, "cmsis_dap_tcp %d: connected to client '%s:%d'.\n",
                     snapshot[i].instance, snapshot[i].client_ip_str,
                     snapshot[i].client_port);
         }

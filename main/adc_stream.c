@@ -228,7 +228,7 @@ static void apply_adc_stream_config(const struct adc_stream_config *config,
     state->active_format = format;
 }
 
-void adc_stream_print_status(void)
+void adc_stream_print_status(FILE *out)
 {
     struct {
         bool active;
@@ -272,7 +272,7 @@ void adc_stream_print_status(void)
             continue;
         any = true;
         if (snapshot[i].client_connected) {
-            fprintf(stdout, "ADC stream: port %d connected to '%s:%d'. "
+            fprintf(out, "ADC stream: port %d connected to '%s:%d'. "
                     "GPIO=%d, %d Hz, averaging=%d, format=%s. Bytes TX=%lu. "
                     "Overflows=%" PRIu32 ". Railed samples=%" PRIu32 ".\n",
                     snapshot[i].port, snapshot[i].client_ip_str,
@@ -281,7 +281,7 @@ void adc_stream_print_status(void)
                     format_str(snapshot[i].format), snapshot[i].count_tx,
                     snapshot[i].overflow_count, snapshot[i].railed_count);
         } else {
-            fprintf(stdout, "ADC stream: listening on port %d. GPIO=%d, "
+            fprintf(out, "ADC stream: listening on port %d. GPIO=%d, "
                     "%d Hz, averaging=%d, format=%s.\n",
                     snapshot[i].port, snapshot[i].gpio,
                     snapshot[i].sample_rate_hz, snapshot[i].averaging_count,
@@ -289,7 +289,7 @@ void adc_stream_print_status(void)
         }
     }
     if (!any)
-        fprintf(stdout, "ADC stream: not running.\n");
+        fprintf(out, "ADC stream: not running.\n");
 }
 
 // ISR context, must be IRAM-resident. Diagnostic only -- flush_pool=1

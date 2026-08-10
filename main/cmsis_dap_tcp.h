@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdio.h>
 #include "DAP_gpio_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -28,7 +29,7 @@ BaseType_t cmsis_dap_tcp_start(const struct cmsis_dap_tcp_config *config,
 // Task that runs the TCP server and processes requests and responses.
 void cmsis_dap_tcp_task(void* arg);
 
-void cmsis_dap_print_status(void);
+void cmsis_dap_print_status(FILE *out);
 
 #ifdef __cplusplus
 }

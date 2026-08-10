@@ -281,7 +281,7 @@ static void apply_uart_config(const struct uart_bridge_config *config)
     ESP_ERROR_CHECK(uart_param_config(config->uart_num, &uart_config));
 }
 
-void uart_bridge_print_status(void)
+void uart_bridge_print_status(FILE *out)
 {
     struct {
         bool active;
@@ -337,13 +337,13 @@ void uart_bridge_print_status(void)
                 &parity, &stop_bits_raw);
         int data_bits = data_bits_raw == UART_DATA_7_BITS ? 7 : 8;
         int stop_bits = stop_bits_raw == UART_STOP_BITS_2 ? 2 : 1;
-        fprintf(stdout, "UART bridge %d: UART%d, listening on port %d. "
+        fprintf(out, "UART bridge %d: UART%d, listening on port %d. "
                 "%d-%d-%s-%d. GPIOs: TX=%d RX=%d.\n",
                 snapshot[i].instance, snapshot[i].uart_num, snapshot[i].port,
                 baud_rate, data_bits, parity_str(parity), stop_bits,
                 snapshot[i].txd_pin, snapshot[i].rxd_pin);
         if (snapshot[i].client_connected) {
-            fprintf(stdout, "UART bridge %d: connected to client '%s:%d'. "
+            fprintf(out, "UART bridge %d: connected to client '%s:%d'. "
                     "Bytes: TX=%lu RX=%lu.\n",
                     snapshot[i].instance, snapshot[i].client_ip_str,
                     snapshot[i].client_port, snapshot[i].count_tx,
@@ -351,7 +351,7 @@ void uart_bridge_print_status(void)
         }
     }
     if (!any)
-        fprintf(stdout, "UART bridge: not running.\n");
+        fprintf(out, "UART bridge: not running.\n");
 }
 
 static void uart_bridge_task(void* arg)

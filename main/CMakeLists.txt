@@ -16,10 +16,19 @@ endif()
 
 set(PRIV_REQUIRES "spi_flash" "esp_driver_gpio" "esp_adc")
 
+# esp_wifi unconditional: REQUIRES resolves before sdkconfig is available.
+set(REQUIRES
+    "lwip" "esp_driver_uart" "esp_event" "esp_timer" "esp_wifi"
+    "nvs_flash" "console")
+
 if(CONFIG_ESP_UART_BRIDGE_1_ENABLED OR
    CONFIG_ESP_UART_BRIDGE_2_ENABLED OR
    CONFIG_ESP_UART_BRIDGE_3_ENABLED)
     list(APPEND COMPONENT_SRCS "uart_bridge.c")
+endif()
+
+if(CONFIG_ESP_DAP_MANAGE_WIFI)
+    list(APPEND COMPONENT_SRCS "wifi.c")
 endif()
 
 if(CONFIG_ESP_ADC_STREAM_ENABLED)
@@ -27,8 +36,14 @@ if(CONFIG_ESP_ADC_STREAM_ENABLED)
     list(APPEND PRIV_REQUIRES "esp_adc")
 endif()
 
-if(CONFIG_ESP_WIFI_CONSOLE_COMMANDS)
+if(CONFIG_ESP_DAP_SERIAL_CONSOLE_ENABLED OR
+   CONFIG_ESP_DAP_SOCKET_CONSOLE_ENABLED)
     list(APPEND COMPONENT_SRCS "commands.c")
+endif()
+
+if(CONFIG_ESP_DAP_SOCKET_CONSOLE_ENABLED)
+    list(APPEND COMPONENT_SRCS "socket_console.c")
+    list(APPEND PRIV_REQUIRES "espressif__esp_linenoise")
 endif()
 
 if(CONFIG_ESP_PRINT_CPU_USAGE)
@@ -42,18 +57,12 @@ if(CONFIG_ESP_DAP_1_LED_RGB OR
     list(APPEND PRIV_REQUIRES "esp_driver_rmt" "espressif__led_strip")
 endif()
 
+# REQUIRES (not PRIV_REQUIRES): uart_bridge.h exposes driver/uart.h's enum
+# types in its public config struct, so dependents need this propagated too.
+# The rest are kept alongside it for simplicity.
 idf_component_register(SRCS ${COMPONENT_SRCS}
                        PRIV_REQUIRES ${PRIV_REQUIRES}
-                       REQUIRES lwip
-                       # Public (not PRIV_REQUIRES): uart_bridge.h exposes
-                       # driver/uart.h's enum types in its public config
-                       # struct, so dependents need this propagated too.
-                       REQUIRES esp_driver_uart
-                       REQUIRES esp_event
-                       REQUIRES esp_timer
-                       REQUIRES esp_wifi
-                       REQUIRES nvs_flash
-                       REQUIRES console
+                       REQUIRES ${REQUIRES}
                        INCLUDE_DIRS ".")
 
 # Allow git hash to be embedded in the DAP_ID_PRODUCT_FW_VER string.
@@ -64,5 +73,6 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     -DGIT_DATE="${GIT_DATE}"
     -DGIT_STATUS="${GIT_STATUS}"
 )
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/.git/index")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/.git/index")
 

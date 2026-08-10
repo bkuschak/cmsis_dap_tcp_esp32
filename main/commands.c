@@ -2,15 +2,15 @@
  * SPDX-FileCopyrightText: Brian Kuschak <bkuschak@gmail.com>
  * SPDX-License-Identifier: Apache-2.0
  *
- * Console commands: registration, argument parsing, and handlers. Runs the
- * REPL over whichever transport CONFIG_ESP_CONSOLE_* selects.
+ * Console commands: argument parsing, handlers, and dispatch for both the
+ * serial console and socket console connections.
  *
- * Handlers take a struct command_context (I/O stream, argtable instances)
- * via func_w_context/context instead of reading module-level globals, so
- * they're reusable by a future second caller with its own context.
+ * Serial console registers the handlers once, at boot, via the ordinary
+ * esp_console_cmd_register()/esp_console_start_repl() path. Socket can't
+ * do that (esp_console doesn't support multiple instances), so socket
+ * commands are handled separately.
  */
 
-#include <assert.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,44 +23,55 @@
 #include "argtable3/argtable3.h"
 #include "driver/uart.h"
 #include "linenoise/linenoise.h"
-#include "esp_wifi.h"
-#include "esp_netif_ip_addr.h"
-#include "esp_netif_types.h"
-#include "nvs_flash.h"
-#include "nvs.h"
 
 #include "commands.h"
 #include "cmsis_dap_tcp.h"
 #include "uart_bridge.h"
+#include "reboot.h"
 
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
 #include "adc_stream.h"
 #include "soc/soc_caps.h"
 #endif
 
-// Owned by main.c.
-extern void reboot(void);
-extern volatile bool wifi_connected;
-extern const char *wifi_ssid;
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
+#include "esp_wifi_types_generic.h"
+#include "esp_netif.h"
+#include "esp_netif_ip_addr.h"
+#include "esp_netif_types.h"
+#include "wifi.h"
+#endif
 
-// Per-caller state: currently only ever one instance (the serial
-// console's, created once at boot in commands_init() and registered
-// once). Each caller owns its own argtable instances, so arg_parse() is
-// never shared across concurrent callers.
+#ifdef CONFIG_ESP_DAP_SOCKET_CONSOLE_ENABLED
+#include <errno.h>
+#include <sys/socket.h>
+#include "esp_linenoise.h"
+#endif
+
+#define MAX_CMD_LINE_ARGS       32
+
+// Shared so both consoles show the same prompt.
+#define COMMANDS_PROMPT "esp32> "
+
+// Per-caller state (own argtable instances, no locking needed): one
+// persistent instance for serial, one per TCP connection for socket.
 enum command_transport {
     COMMAND_TRANSPORT_SERIAL,
+    COMMAND_TRANSPORT_SOCKET,
 };
 
 struct command_context {
     FILE *out;
     enum command_transport transport;
 
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     struct {
         struct arg_str *ssid;
         struct arg_str *password;
         struct arg_str *auth_mode;
         struct arg_end *end;
     } wifi_args;
+#endif
 
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
@@ -86,16 +97,9 @@ struct command_context {
 #endif
 };
 
-#define NVS_NAMESPACE           "wifi_config"
-#define NVS_KEY_SSID            "ssid"
-#define NVS_KEY_PASSWORD        "password"
-#define NVS_KEY_AUTH_MODE       "auth_mode"
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
 #define MAX_SSID_LEN            32
 #define MAX_PASSWORD_LEN        64
-
-static char stored_ssid[MAX_SSID_LEN] = {0};
-static char stored_password[MAX_PASSWORD_LEN] = {0};
-static wifi_auth_mode_t stored_auth_mode = WIFI_AUTH_WPA2_PSK;
 
 static wifi_auth_mode_t parse_auth_mode(const char* auth_str)
 {
@@ -119,88 +123,6 @@ static wifi_auth_mode_t parse_auth_mode(const char* auth_str)
     }
 }
 
-static esp_err_t save_wifi_credentials(const char* ssid, const char* password,
-        wifi_auth_mode_t auth_mode)
-{
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    err = nvs_set_str(nvs_handle, NVS_KEY_SSID, ssid);
-    if (err == ESP_OK) {
-        err = nvs_set_str(nvs_handle, NVS_KEY_PASSWORD, password);
-    }
-    if (err == ESP_OK) {
-        err = nvs_set_u8(nvs_handle, NVS_KEY_AUTH_MODE, (uint8_t)auth_mode);
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs_handle);
-    }
-
-    nvs_close(nvs_handle);
-    return err;
-}
-
-static esp_err_t load_wifi_credentials(void)
-{
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    size_t ssid_len = MAX_SSID_LEN;
-    size_t password_len = MAX_PASSWORD_LEN;
-    uint8_t auth_mode;
-
-    err = nvs_get_str(nvs_handle, NVS_KEY_SSID, stored_ssid, &ssid_len);
-    if (err == ESP_OK) {
-        err = nvs_get_str(nvs_handle, NVS_KEY_PASSWORD, stored_password,
-                &password_len);
-    }
-    if (err == ESP_OK) {
-        err = nvs_get_u8(nvs_handle, NVS_KEY_AUTH_MODE, &auth_mode);
-        if (err == ESP_OK) {
-            stored_auth_mode = (wifi_auth_mode_t)auth_mode;
-        }
-    }
-
-    nvs_close(nvs_handle);
-    return err;
-}
-
-static esp_err_t clear_wifi_credentials(void)
-{
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    // Erase the entire namespace to clear all WiFi credentials.
-    err = nvs_erase_all(nvs_handle);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs_handle);
-    }
-
-    nvs_close(nvs_handle);
-    return err;
-}
-
-bool commands_get_stored_wifi_credentials(const char **ssid,
-        const char **password, wifi_auth_mode_t *auth_mode)
-{
-    if (load_wifi_credentials() != ESP_OK || strlen(stored_ssid) == 0)
-        return false;
-
-    *ssid = stored_ssid;
-    *password = stored_password;
-    *auth_mode = stored_auth_mode;
-    return true;
-}
-
 static int wifi_cmd_handler(void *context, int argc, char **argv)
 {
     struct command_context *ctx = context;
@@ -221,7 +143,7 @@ static int wifi_cmd_handler(void *context, int argc, char **argv)
     // Check for empty SSID. If empty, clear stored credentials.
     if (strlen(ssid) == 0) {
         fprintf(out, "Empty SSID provided. Clearing WiFi credentials from flash.\n");
-        esp_err_t err = clear_wifi_credentials();
+        esp_err_t err = wifi_clear_config();
         if (err == ESP_OK) {
             fprintf(out, "WiFi credentials cleared successfully.\n");
             fprintf(out, "Reboot required to use hardcoded CONFIG values.\n");
@@ -251,7 +173,7 @@ static int wifi_cmd_handler(void *context, int argc, char **argv)
     fprintf(out, "  Password: %s\n", password);
     fprintf(out, "  Auth mode: %s\n", auth_mode_str);
 
-    esp_err_t err = save_wifi_credentials(ssid, password, auth_mode);
+    esp_err_t err = wifi_save_config(ssid, password, auth_mode);
     if (err == ESP_OK) {
         fprintf(out, "WiFi credentials saved successfully.\n");
         fprintf(out, "Reboot required to apply new settings.\n");
@@ -261,6 +183,7 @@ static int wifi_cmd_handler(void *context, int argc, char **argv)
     }
     return 0;
 }
+#endif // CONFIG_ESP_DAP_MANAGE_WIFI
 
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
@@ -499,7 +422,7 @@ static int reboot_cmd_handler(void *context, int argc, char **argv)
     return 0;
 }
 
-#ifdef CONFIG_LWIP_IPV6
+#if defined(CONFIG_ESP_DAP_MANAGE_WIFI) && defined(CONFIG_LWIP_IPV6)
 static const char* ipv6_type_str(esp_ip6_addr_type_t type)
 {
     switch (type) {
@@ -518,6 +441,8 @@ static int status_cmd_handler(void *context, int argc, char **argv)
 {
     struct command_context *ctx = context;
     FILE *out = ctx->out;
+
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
 
     if (netif == NULL) {
@@ -525,13 +450,16 @@ static int status_cmd_handler(void *context, int argc, char **argv)
         return 0;
     }
 
-    if(!wifi_connected) {
-        fprintf(out, "Not connected to WiFi SSID: '%s'\n", wifi_ssid);
+    bool connected;
+    const char *ssid;
+    int rssi;
+    wifi_get_status(&connected, &ssid, &rssi);
+
+    if (!connected) {
+        fprintf(out, "Not connected to WiFi SSID: '%s'\n", ssid);
     }
     else {
-        int rssi = 0;
-        esp_wifi_sta_get_rssi(&rssi);
-        fprintf(out, "Connected to WiFi SSID: '%s'. RSSI: %d dBm\n", wifi_ssid,
+        fprintf(out, "Connected to WiFi SSID: '%s'. RSSI: %d dBm\n", ssid,
                 rssi);
 
         esp_netif_ip_info_t ip_info;
@@ -563,17 +491,23 @@ static int status_cmd_handler(void *context, int argc, char **argv)
         }
 #endif
     }
+#endif // CONFIG_ESP_DAP_MANAGE_WIFI
 
-    cmsis_dap_print_status();
+#ifdef CONFIG_ESP_DAP_SOCKET_CONSOLE_ENABLED
+    fprintf(out, "Socket console: listening on port %d.\n",
+            CONFIG_ESP_DAP_SOCKET_CONSOLE_TCP_PORT);
+#endif
+
+    cmsis_dap_print_status(out);
 
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
-    uart_bridge_print_status();
+    uart_bridge_print_status(out);
 #endif
 
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
-    adc_stream_print_status();
+    adc_stream_print_status(out);
 #endif
     return 0;
 }
@@ -584,8 +518,10 @@ static int help_cmd_handler(void *context, int argc, char **argv)
     FILE *out = ctx->out;
     fprintf(out, "Available commands:\n");
     fprintf(out, "  help - Show this help message.\n");
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     fprintf(out, "  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure WiFi "
            "credentials.\n");
+#endif
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
@@ -610,6 +546,7 @@ static struct command_context *command_context_create(enum command_transport tra
     ctx->out = out;
     ctx->transport = transport;
 
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     ctx->wifi_args.ssid = arg_str1(NULL, NULL, "<ssid>", "WiFi network SSID");
     ctx->wifi_args.password =
         arg_str1(NULL, NULL, "<password>", "WiFi network password");
@@ -617,6 +554,7 @@ static struct command_context *command_context_create(enum command_transport tra
         arg_str0(NULL, NULL, "[auth_mode]", "Authentication mode: open, wep, "
                 "wpa, wpa2, wpa3");
     ctx->wifi_args.end = arg_end(3);
+#endif
 
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
@@ -648,12 +586,161 @@ static struct command_context *command_context_create(enum command_transport tra
     return ctx;
 }
 
-void commands_init(void)
+#ifdef CONFIG_ESP_DAP_SOCKET_CONSOLE_ENABLED
+#define MAX_CMD_LINE_LENGTH     256
+
+// Dispatch table for process_socket_commands() (serial instead uses
+// esp_console_cmd_register() in commands_init_serial()). void* matches
+// esp_console_cmd_func_with_context_t, so handlers can be shared.
+static const struct {
+    const char *name;
+    int (*func)(void *context, int argc, char **argv);
+} socket_commands[] = {
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    { "adc",    adc_cmd_handler },
+#endif
+    { "help",   help_cmd_handler },
+    { "reboot", reboot_cmd_handler },
+    { "status", status_cmd_handler },
+#if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
+    { "uart",   uart_cmd_handler },
+#endif
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
+    { "wifi",   wifi_cmd_handler },
+#endif
+};
+#define NUM_COMMANDS (sizeof(socket_commands) / sizeof(socket_commands[0]))
+
+static void command_context_destroy(struct command_context *ctx)
+{
+    if (ctx == NULL)
+        return;
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
+    arg_freetable((void **)&ctx->wifi_args,
+            sizeof(ctx->wifi_args) / sizeof(void *));
+#endif
+#if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
+    defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
+    arg_freetable((void **)&ctx->uart_args,
+            sizeof(ctx->uart_args) / sizeof(void *));
+#endif
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    arg_freetable((void **)&ctx->adc_args,
+            sizeof(ctx->adc_args) / sizeof(void *));
+#endif
+    free(ctx);
+}
+
+static void commands_run_socket(struct command_context *ctx, char *line)
+{
+    char *argv[MAX_CMD_LINE_ARGS];
+    size_t argc = esp_console_split_argv(line, argv, MAX_CMD_LINE_ARGS);
+    if (argc == 0)
+        return;     // empty (or all-whitespace) line
+
+    for (size_t i = 0; i < NUM_COMMANDS; i++) {
+        if (strcmp(argv[0], socket_commands[i].name) == 0) {
+            int ret = socket_commands[i].func(ctx, (int)argc, argv);
+            if (ret != 0)
+                fprintf(ctx->out, "Command returned non-zero error code: %d\n", ret);
+            fflush(ctx->out);
+            return;
+        }
+    }
+    fprintf(ctx->out, "Unrecognized command\n");
+    fflush(ctx->out);
+}
+
+static void commands_complete_socket(const char *buf, void *cb_ctx,
+        void (*add)(void *cb_ctx, const char *str))
+{
+    size_t len = strlen(buf);
+    for (size_t i = 0; i < NUM_COMMANDS; i++) {
+        if (strncmp(buf, socket_commands[i].name, len) == 0)
+            add(cb_ctx, socket_commands[i].name);
+    }
+}
+
+// esp_linenoise_get_line() can't distinguish a dead connection from an
+// empty line -- both return an empty string. Check the socket directly.
+static bool peer_closed(int fd)
+{
+    char buf;
+    ssize_t n = recv(fd, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
+    if (n == 0)
+        return true;                                // orderly close
+    if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+        return true;                                 // real error
+    return false;
+}
+
+// Runs one socket connection's REPL to completion. f/fd remain owned by
+// the caller throughout.
+void process_socket_commands(FILE *f)
+{
+    int fd = fileno(f);
+    struct command_context *ctx =
+        command_context_create(COMMAND_TRANSPORT_SOCKET, f);
+    if (ctx == NULL) {
+        fprintf(stderr, "Command socket: out of memory creating context (fd %d).\n", fd);
+        return;
+    }
+
+    esp_linenoise_config_t ln_config;
+    esp_linenoise_get_instance_config_default(&ln_config);
+    ln_config.prompt = COMMANDS_PROMPT;
+    ln_config.max_cmd_line_length = MAX_CMD_LINE_LENGTH;
+    ln_config.in_fd = fd;
+    ln_config.out_fd = fd;
+    ln_config.completion_cb = commands_complete_socket;
+    ln_config.allow_dumb_mode = true;  // plain clients (e.g. netcat) don't speak ANSI
+
+    esp_linenoise_handle_t handle;
+    if (esp_linenoise_create_instance(&ln_config, &handle) != ESP_OK) {
+        fprintf(stderr, "Command socket: failed to create linenoise instance (fd %d).\n",
+                fd);
+        command_context_destroy(ctx);
+        return;
+    }
+
+    // Terminals that reply to the dumb-mode probe (ESC[5n) don't send that
+    // reply on its own -- telnet/nc queue it and flush it together with the
+    // first line the user types. Strip the resulting "[0n"/"[3n" prefix
+    // (ESC already consumed as a control char) from just the first line.
+    bool dumb_mode = false;
+    esp_linenoise_is_dumb_mode(handle, &dumb_mode);
+    bool first_line = dumb_mode;
+
+    char line[MAX_CMD_LINE_LENGTH];
+    while (1) {
+        esp_linenoise_get_line(handle, line, sizeof(line));
+        if (peer_closed(fd))
+            break;
+        if (first_line) {
+            first_line = false;
+            if (line[0] == '[' && isdigit((unsigned char)line[1]) && line[2] == 'n')
+                memmove(line, line + 3, strlen(line + 3) + 1);
+        }
+        if (line[0] != '\0') {
+            esp_linenoise_history_add(handle, line);
+            commands_run_socket(ctx, line);
+        }
+    }
+
+    esp_linenoise_delete_instance(handle);
+    command_context_destroy(ctx);
+}
+#endif // CONFIG_ESP_DAP_SOCKET_CONSOLE_ENABLED
+
+void commands_init_serial(void)
 {
     // Initialize console.
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
-    repl_config.prompt = "esp32> ";
+    repl_config.prompt = COMMANDS_PROMPT;
     repl_config.max_cmdline_length = 256;
 
 #if defined(CONFIG_ESP_CONSOLE_UART_DEFAULT) || \
@@ -676,18 +763,25 @@ void commands_init(void)
 #error "Unsupported console type!"
 #endif
 
-    // The REPL setup above registers a per-keystroke "hints" callback that
-    // fires once the typed buffer's length matches a registered command
-    // name, rendering that command's .hint via ANSI escape codes. None of
-    // our commands set a .hint, so it has nothing useful to show, and on
-    // some terminals it shows up as garbage characters instead. Disable it.
+    // Disable the REPL's keystroke hints callback -- none of our commands
+    // set .hint, so it has nothing to show and just prints garbage on some
+    // terminals.
     linenoiseSetHintsCallback(NULL);
 
-    // One context for the serial console's entire lifetime, registered
-    // below and never touched again.
+    // One context for serial's entire lifetime -- unlike socket, there's
+    // only ever one registration per command, so esp_console's shared
+    // table is fine here.
     struct command_context *ctx =
         command_context_create(COMMAND_TRANSPORT_SERIAL, stdout);
-    assert(ctx);
+    if (ctx == NULL) {
+        fprintf(stderr, "Serial console: out of memory creating context.\n");
+        return;
+    }
+
+    printf("Enabling console commands.\n");
+
+    // Deregister the built-in help handler so ours gets a clean slot.
+    esp_console_deregister_help_command();
 
     // Register commands.
     const esp_console_cmd_t help_cmd = {
@@ -714,14 +808,15 @@ void commands_init(void)
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&status_cmd));
 
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     const esp_console_cmd_t wifi_cmd = {
         .command = "wifi",
         .help = "Configure WiFi credentials",
         .func_w_context = wifi_cmd_handler,
         .context = ctx,
     };
-    printf("Enabling console commands.\n");
     ESP_ERROR_CHECK(esp_console_cmd_register(&wifi_cmd));
+#endif
 
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \

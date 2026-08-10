@@ -1,82 +1,5 @@
 menu "CMSIS-DAP configuration"
 
-    menu "WiFi configuration"
-
-        config ESP_WIFI_SSID
-            string "WiFi SSID"
-            default "myssid"
-            help
-                SSID (network name) to connect to.
-
-        config ESP_WIFI_PASSWORD
-            string "WiFi Password"
-            default "mypassword"
-            help
-                WiFi password (WPA or WPA2) to use.
-
-        choice ESP_WIFI_SAE_MODE
-            prompt "WPA3 SAE mode selection"
-            default ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
-            help
-                Select mode for SAE as Hunt and Peck, H2E or both.
-            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HUNT_AND_PECK
-                bool "HUNT AND PECK"
-            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HASH_TO_ELEMENT
-                bool "H2E"
-                depends on ESP_WIFI_ENABLE_SAE_H2E
-            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
-                bool "BOTH"
-                depends on ESP_WIFI_ENABLE_SAE_H2E
-        endchoice
-
-        config ESP_WIFI_PW_ID
-            string "PASSWORD IDENTIFIER"
-            depends on  ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HASH_TO_ELEMENT || ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
-            default ""
-            help
-                password identifier for SAE H2E
-
-        config ESP_MAXIMUM_RETRY
-            int "Maximum retries"
-            default 5
-            help
-                Set the maximum number of retries to avoid station reconnecting to the AP forever when the AP is really inexistent.
-
-        choice ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD
-            prompt "WiFi Scan auth mode threshold"
-            default ESP_WIFI_AUTH_WPA2_PSK
-            help
-                The weakest authmode to accept in the scan mode.
-                This value defaults to ESP_WIFI_AUTH_WPA2_PSK in case password is present and ESP_WIFI_AUTH_OPEN is used.
-                Please select ESP_WIFI_AUTH_WEP/ESP_WIFI_AUTH_WPA_PSK in case AP is operating in WEP/WPA mode.
-
-            config ESP_WIFI_AUTH_OPEN
-                bool "OPEN"
-            config ESP_WIFI_AUTH_WEP
-                bool "WEP"
-            config ESP_WIFI_AUTH_WPA_PSK
-                bool "WPA PSK"
-            config ESP_WIFI_AUTH_WPA2_PSK
-                bool "WPA2 PSK"
-            config ESP_WIFI_AUTH_WPA_WPA2_PSK
-                bool "WPA/WPA2 PSK"
-            config ESP_WIFI_AUTH_WPA3_PSK
-                bool "WPA3 PSK"
-            config ESP_WIFI_AUTH_WPA2_WPA3_PSK
-                bool "WPA2/WPA3 PSK"
-            config ESP_WIFI_AUTH_WAPI_PSK
-                bool "WAPI PSK"
-        endchoice
-
-        config ESP_WIFI_CONSOLE_COMMANDS
-            bool "Enable console commands for setting WiFi credentials at runtime."
-            default y
-            help
-                Enable console commands (wifi, reboot) for configuring WiFi
-                credentials at runtime and storing them in flash.
-
-    endmenu
-
     menu "CMSIS-DAP Interface #1"
 
         config ESP_DAP_1_TCP_PORT
@@ -845,6 +768,57 @@ menu "CMSIS-DAP configuration"
 
     endmenu
 
+    menu "Console commands"
+
+        config ESP_DAP_SERIAL_CONSOLE_ENABLED
+            bool "Enable console commands over serial console (UART/USB)"
+            default y
+            help
+                Registers commands (wifi, uart, adc, status, ...) on the
+                serial console selected under Component config > ESP
+                System Settings > Channel for console output.
+
+        config ESP_DAP_SOCKET_CONSOLE_ENABLED
+            bool "Enable console commands over TCP socket"
+            default y
+            help
+                Runs the same console commands available on the serial
+                console (wifi, uart, adc, status, ...) over a TCP socket
+                too. Supports multiple simultaneous connections. Works
+                independently of ESP_DAP_MANAGE_WIFI -- useful when a host
+                project brings up its own networking but still wants this
+                console.
+
+        menu "Console commands over TCP"
+            depends on ESP_DAP_SOCKET_CONSOLE_ENABLED
+
+            config ESP_DAP_SOCKET_CONSOLE_TCP_PORT
+                int "TCP port number"
+                default 4440
+                depends on ESP_DAP_SOCKET_CONSOLE_ENABLED
+                help
+                    Select the TCP port number for the socket console.
+
+            config ESP_DAP_SOCKET_CONSOLE_USE_KEEPALIVE
+                bool "Enable TCP keep-alive packets and disconnect on timeout"
+                default y
+                depends on ESP_DAP_SOCKET_CONSOLE_ENABLED
+                help
+                    To detect dead clients, use TCP keepalives and drop the
+                    connection if a timeout occurs.
+
+            config ESP_DAP_SOCKET_CONSOLE_KEEPALIVE_TIMEOUT
+                int "TCP keep-alive timeout in seconds"
+                default 10
+                depends on ESP_DAP_SOCKET_CONSOLE_ENABLED && ESP_DAP_SOCKET_CONSOLE_USE_KEEPALIVE
+                help
+                    Drop the connection if a client does not respond for this
+                    number of seconds.
+
+        endmenu
+
+    endmenu
+
     menu "ADC streaming"
 
         config ESP_ADC_STREAM_ENABLED
@@ -985,6 +959,89 @@ menu "CMSIS-DAP configuration"
             help
                 Additive offset applied after the gain correction above.
                 May be negative.
+
+    endmenu
+
+    menu "WiFi configuration"
+
+        config ESP_DAP_MANAGE_WIFI
+            bool "Enable WiFi configuration and connection management"
+            default y
+            help
+                Initializes WiFi, connects to the configured AP, and
+                manages reconnection. Disable if a host project (when
+                this is consumed as a component) manages WiFi/networking
+                itself, or the target board has no WiFi radio.
+
+        if ESP_DAP_MANAGE_WIFI
+
+        config ESP_WIFI_SSID
+            string "WiFi SSID"
+            default "myssid"
+            help
+                SSID (network name) to connect to.
+
+        config ESP_WIFI_PASSWORD
+            string "WiFi Password"
+            default "mypassword"
+            help
+                WiFi password (WPA or WPA2) to use.
+
+        choice ESP_WIFI_SAE_MODE
+            prompt "WPA3 SAE mode selection"
+            default ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
+            help
+                Select mode for SAE as Hunt and Peck, H2E or both.
+            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HUNT_AND_PECK
+                bool "HUNT AND PECK"
+            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HASH_TO_ELEMENT
+                bool "H2E"
+                depends on ESP_WIFI_ENABLE_SAE_H2E
+            config ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
+                bool "BOTH"
+                depends on ESP_WIFI_ENABLE_SAE_H2E
+        endchoice
+
+        config ESP_WIFI_PW_ID
+            string "PASSWORD IDENTIFIER"
+            depends on  ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HASH_TO_ELEMENT || ESP_STATION_EXAMPLE_WPA3_SAE_PWE_BOTH
+            default ""
+            help
+                password identifier for SAE H2E
+
+        config ESP_MAXIMUM_RETRY
+            int "Maximum retries"
+            default 5
+            help
+                Set the maximum number of retries to avoid station reconnecting to the AP forever when the AP is really inexistent.
+
+        choice ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD
+            prompt "WiFi Scan auth mode threshold"
+            default ESP_WIFI_AUTH_WPA2_PSK
+            help
+                The weakest authmode to accept in the scan mode.
+                This value defaults to ESP_WIFI_AUTH_WPA2_PSK in case password is present and ESP_WIFI_AUTH_OPEN is used.
+                Please select ESP_WIFI_AUTH_WEP/ESP_WIFI_AUTH_WPA_PSK in case AP is operating in WEP/WPA mode.
+
+            config ESP_WIFI_AUTH_OPEN
+                bool "OPEN"
+            config ESP_WIFI_AUTH_WEP
+                bool "WEP"
+            config ESP_WIFI_AUTH_WPA_PSK
+                bool "WPA PSK"
+            config ESP_WIFI_AUTH_WPA2_PSK
+                bool "WPA2 PSK"
+            config ESP_WIFI_AUTH_WPA_WPA2_PSK
+                bool "WPA/WPA2 PSK"
+            config ESP_WIFI_AUTH_WPA3_PSK
+                bool "WPA3 PSK"
+            config ESP_WIFI_AUTH_WPA2_WPA3_PSK
+                bool "WPA2/WPA3 PSK"
+            config ESP_WIFI_AUTH_WAPI_PSK
+                bool "WAPI PSK"
+        endchoice
+
+        endif
 
     endmenu
 

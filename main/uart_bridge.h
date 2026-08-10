@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdio.h>
 #include <driver/uart.h>
 #include "esp_err.h"
 
@@ -25,7 +26,7 @@ struct uart_bridge_config {
 BaseType_t uart_bridge_start(const struct uart_bridge_config *config,
         const char *task_name, TaskHandle_t *handle);
 
-void uart_bridge_print_status(void);
+void uart_bridge_print_status(FILE *out);
 
 // Persist UART line settings to flash for the given UART number. Applied to
 // new TCP client connections; does not affect an already-open connection.
