@@ -716,6 +716,9 @@ void process_socket_commands(FILE *f)
 
     char line[MAX_CMD_LINE_LENGTH];
     while (1) {
+        // Work around an off-by-one in esp_linenoise_dumb() that leaves a
+        // stale byte from the previous line in this reused buffer.
+        memset(line, 0, sizeof(line));
         esp_linenoise_get_line(handle, line, sizeof(line));
         if (peer_closed(fd))
             break;
