@@ -16,16 +16,17 @@
 # You may pass OUT_DIR and SERVER_CN as environment variables. SERVER_CN
 # isn't checked against connection address by this project's stunnel config
 # (verifyChain without checkHost/checkIP -- it only verifies the CA chain,
-# not server identity), so it doesn't need to be an IP/hostname; prefer a
-# stable identifier (device name/serial) over a network address, especially
-# for a mobile device that may roam across networks.
+# not server identity), so it doesn't need to be an IP/hostname, and doesn't
+# need to be unique per device -- fine, and with no per-unit serial known at
+# build time usually the only practical choice, for every unit built from
+# the same firmware to share one generic fleet-level name.
 #
 # Requires 'openssl'.
 #
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT_DIR=${OUT_DIR:="${SCRIPT_DIR}/certs"}
-SERVER_CN=${SERVER_CN:="esp32-dap"}
+SERVER_CN=${SERVER_CN:="CMSIS-DAP-TCP device"}
 MAIN_CERTS_DIR="${SCRIPT_DIR}/../main/certs"
 
 set -e
