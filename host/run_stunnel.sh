@@ -17,15 +17,15 @@
 
 HOST=${HOST:="192.168.1.5"}
 CERT_DIR=${CERT_DIR:="$(dirname "$0")/certs"}
-CLIENT_NAME=${CLIENT_NAME:="client"}
+CLIENT_NAME=${CLIENT_NAME:="User1"}
 CONF=$(mktemp)
 trap 'rm -f "${CONF}"' EXIT
 
 cat > "${CONF}" <<EOF
 foreground = yes
 client = yes
-cert = ${CERT_DIR}/${CLIENT_NAME}.pem
-key = ${CERT_DIR}/${CLIENT_NAME}.key
+cert = ${CERT_DIR}/clients/${CLIENT_NAME}.pem
+key = ${CERT_DIR}/clients/${CLIENT_NAME}.key
 CAfile = ${CERT_DIR}/cacert.pem
 verifyChain = yes
 

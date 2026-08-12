@@ -9,7 +9,7 @@
 #   <name> should be the person's actual name or another ID meaningful to
 #   you -- it becomes the cert's Common Name. Quote it to use a first +
 #   last name:
-#     ./gen_client_cert.sh "Alice Smith"  ->  host/certs/Alice Smith.pem, .key
+#     ./gen_client_cert.sh "Alice Smith"  ->  host/certs/clients/Alice Smith.pem, .key
 #
 # You may pass OUT_DIR as an environment variable (must already contain
 # ca.key/cacert.pem from gen_esp32_certs.sh).
@@ -31,13 +31,14 @@ if [ ! -f "${OUT_DIR}/ca.key" ] || [ ! -f "${OUT_DIR}/cacert.pem" ]; then
 fi
 
 set -e
-cd "${OUT_DIR}"
+mkdir -p "${OUT_DIR}/clients"
+cd "${OUT_DIR}/clients"
 
 echo "Generating client cert (CN=${NAME})..."
 openssl ecparam -name prime256v1 -genkey -noout -out "${NAME}.key"
 openssl req -new -key "${NAME}.key" -subj "/CN=${NAME}" -out "${NAME}.csr"
-openssl x509 -req -in "${NAME}.csr" -CA cacert.pem -CAkey ca.key -CAcreateserial \
-    -days 3650 -sha256 -out "${NAME}.pem"
+openssl x509 -req -in "${NAME}.csr" -CA "${OUT_DIR}/cacert.pem" -CAkey "${OUT_DIR}/ca.key" \
+    -CAcreateserial -days 3650 -sha256 -out "${NAME}.pem"
 rm -f "${NAME}.csr"
 
 echo
@@ -45,5 +46,5 @@ echo "Client cert serial (for a future cert allowlist/blocklist):"
 openssl x509 -in "${NAME}.pem" -noout -serial
 
 echo
-echo "${OUT_DIR}/${NAME}.pem / ${NAME}.key -- pass CLIENT_NAME=${NAME} to"
+echo "${OUT_DIR}/clients/${NAME}.pem / ${NAME}.key -- pass CLIENT_NAME=${NAME} to"
 echo "run_stunnel.sh / cert_info.sh to use this cert."
