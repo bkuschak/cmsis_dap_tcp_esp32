@@ -1,20 +1,24 @@
 #!/bin/sh
 #
-# Generates a throwaway CA + ESP32 server cert/key, EC P-256 (required by
-# CONFIG_ESP_TLS_ECDSA_ONLY_CIPHERSUITES), for testing CONFIG_ESP_TLS_ENABLED
-# end to end. NOT for production use -- replace with certs from your own CA
-# before deploying for real.
+# Generates (or reuses) a CA, then generates an ESP32 server cert/key signed
+# by it, EC P-256 (required by CONFIG_ESP_TLS_ECDSA_ONLY_CIPHERSUITES), for
+# CONFIG_ESP_TLS_ENABLED. The default CA is a throwaway test CA -- NOT for
+# production use. To sign against your own PKI instead, drop your own
+# ca.key + cacert.pem into OUT_DIR before running this: it's reused as-is
+# rather than replaced. See main/certs/README.md for the full set of
+# supported workflows, including providing the ESP32 cert yourself too.
 #
-# Run once per deployment (the CA is the fixed trust root -- regenerating it
-# invalidates every client cert already issued against it). Skips if certs
-# already exist; pass FORCE=1 to regenerate anyway.
+# Skips work already done: reuses an existing CA in OUT_DIR, and skips
+# server cert generation if main/certs/servercert.pem already exists. Pass
+# FORCE=1 to regenerate everything, including the CA -- this invalidates
+# every client cert already issued against the old one.
 #
-# Server cert/key + CA are copied into main/certs/ (embedded into the
-# firmware at build time). A copy of the CA is left in OUT_DIR for
-# gen_client_cert.sh and host-side tools (stunnel, openssl s_client).
-#
-# You may pass OUT_DIR and SERVER_CN (should match how you reach the ESP32,
-# e.g. its IP) as environment variables.
+# You may pass OUT_DIR and SERVER_CN as environment variables. SERVER_CN
+# isn't checked against connection address by this project's stunnel config
+# (verifyChain without checkHost/checkIP -- it only verifies the CA chain,
+# not server identity), so it doesn't need to be an IP/hostname; prefer a
+# stable identifier (device name/serial) over a network address, especially
+# for a mobile device that may roam across networks.
 #
 # Requires 'openssl'.
 #
@@ -28,16 +32,20 @@ set -e
 mkdir -p "${OUT_DIR}" "${MAIN_CERTS_DIR}"
 cd "${OUT_DIR}"
 
-if [ -z "${FORCE}" ] && [ -f cacert.pem ] && [ -f "${MAIN_CERTS_DIR}/servercert.pem" ]; then
-    echo "Certs already exist in ${OUT_DIR} and ${MAIN_CERTS_DIR} -- skipping."
-    echo "Pass FORCE=1 to regenerate (invalidates all previously issued client certs)."
-    exit 0
+if [ -n "${FORCE}" ] || [ ! -f ca.key ] || [ ! -f cacert.pem ]; then
+    echo "Generating CA..."
+    openssl ecparam -name prime256v1 -genkey -noout -out ca.key
+    openssl req -x509 -new -key ca.key -sha256 -days 3650 \
+        -subj "/CN=cmsis_dap_tcp_esp32 test CA" -out cacert.pem
+else
+    echo "Reusing existing CA in ${OUT_DIR}."
 fi
 
-echo "Generating CA..."
-openssl ecparam -name prime256v1 -genkey -noout -out ca.key
-openssl req -x509 -new -key ca.key -sha256 -days 3650 \
-    -subj "/CN=cmsis_dap_tcp_esp32 test CA" -out cacert.pem
+if [ -z "${FORCE}" ] && [ -f "${MAIN_CERTS_DIR}/servercert.pem" ]; then
+    echo "Server cert already exists in ${MAIN_CERTS_DIR} -- skipping."
+    echo "Pass FORCE=1 to regenerate."
+    exit 0
+fi
 
 echo "Generating server cert (CN=${SERVER_CN})..."
 openssl ecparam -name prime256v1 -genkey -noout -out prvtkey.pem
