@@ -6,23 +6,26 @@
 # etc. at 127.0.0.1:<port>, same as if CONFIG_ESP_TLS_ENABLED were off.
 #
 # The ESP32 must be running with CONFIG_ESP_TLS_ENABLED=y and the same CA
-# as the client cert below (see gen_certs.sh).
+# as the client cert below (see gen_esp32_certs.sh / gen_client_cert.sh).
 #
-# You may pass HOST and CERT_DIR as environment variables.
+# You may pass HOST, CERT_DIR, and CLIENT_NAME (which client cert to
+# present, if you've issued more than one via gen_client_cert.sh) as
+# environment variables.
 #
 # Requires 'stunnel' (e.g. 'brew install stunnel').
 #
 
 HOST=${HOST:="192.168.1.5"}
 CERT_DIR=${CERT_DIR:="$(dirname "$0")/certs"}
+CLIENT_NAME=${CLIENT_NAME:="client"}
 CONF=$(mktemp)
 trap 'rm -f "${CONF}"' EXIT
 
 cat > "${CONF}" <<EOF
 foreground = yes
 client = yes
-cert = ${CERT_DIR}/client.pem
-key = ${CERT_DIR}/client.key
+cert = ${CERT_DIR}/${CLIENT_NAME}.pem
+key = ${CERT_DIR}/${CLIENT_NAME}.key
 CAfile = ${CERT_DIR}/cacert.pem
 verifyChain = yes
 
