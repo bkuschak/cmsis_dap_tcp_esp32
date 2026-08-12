@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# Runs stunnel on the host machine as a TLS-terminating proxy: local
+# plaintext ports (matching this project's normal port numbers) forward to
+# the ESP32's TLS ports over mutual TLS. Point OpenOCD, a serial terminal,
+# etc. at 127.0.0.1:<port>, same as if CONFIG_ESP_TLS_ENABLED were off.
+#
+# The ESP32 must be running with CONFIG_ESP_TLS_ENABLED=y and the same CA
+# as the client cert below (see gen_certs.sh).
+#
+# You may pass HOST and CERT_DIR as environment variables.
+#
+# Requires 'stunnel' (e.g. 'brew install stunnel').
+#
+
+HOST=${HOST:="192.168.1.5"}
+CERT_DIR=${CERT_DIR:="$(dirname "$0")/certs"}
+CONF=$(mktemp)
+trap 'rm -f "${CONF}"' EXIT
+
+cat > "${CONF}" <<EOF
+foreground = yes
+client = yes
+cert = ${CERT_DIR}/client.pem
+key = ${CERT_DIR}/client.key
+CAfile = ${CERT_DIR}/cacert.pem
+verifyChain = yes
+
+[console]
+accept = 127.0.0.1:4440
+connect = ${HOST}:4440
+
+[dap1]
+accept = 127.0.0.1:4441
+connect = ${HOST}:4441
+
+[uart1]
+accept = 127.0.0.1:4442
+connect = ${HOST}:4442
+
+[dap2]
+accept = 127.0.0.1:4443
+connect = ${HOST}:4443
+
+[uart2]
+accept = 127.0.0.1:4444
+connect = ${HOST}:4444
+
+[dap3]
+accept = 127.0.0.1:4445
+connect = ${HOST}:4445
+
+[uart3]
+accept = 127.0.0.1:4446
+connect = ${HOST}:4446
+
+[adc]
+accept = 127.0.0.1:4451
+connect = ${HOST}:4451
+EOF
+
+echo "Proxying local ports to ${HOST} via mutual TLS (Ctrl-C to stop)."
+echo "Services not actually enabled on the ESP32 will just fail to connect -- harmless."
+stunnel "${CONF}"

@@ -6,3 +6,4 @@ dependencies.lock
 .cache/
 main/certs/*.pem
 host/certs/
+__pycache__/
