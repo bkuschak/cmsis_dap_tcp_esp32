@@ -547,7 +547,8 @@ static void uart_bridge_task(void* arg)
         if(client_fd > 0 && FD_ISSET(client_fd, &read_fds)) {
             ret = recv(client_fd, state.buffer, sizeof(state.buffer)-1, 0);
             if(ret == 0 ||
-              (ret < 0 && (errno == ECONNABORTED || errno == ENOTCONN))) {
+              (ret < 0 && (errno == ECONNRESET || errno == ECONNABORTED ||
+                           errno == ENOTCONN))) {
                 // Client has disconnected.
                 fprintf(stdout, "UART bridge %d: client disconnected.\n",
                         task_state->config->instance);
