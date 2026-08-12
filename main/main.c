@@ -87,10 +87,8 @@ static BaseType_t cmsis_dap_tcp_task_start(void)
         .instance = 1,
         .port = CONFIG_ESP_DAP_1_TCP_PORT,
 #ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
-        .disable_keepalive = false,
         .keepalive_timeout = CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT,
 #else
-        .disable_keepalive = true,
         .keepalive_timeout = 0,
 #endif
         .gpio = {
@@ -161,10 +159,8 @@ static BaseType_t cmsis_dap_tcp_2_task_start(void)
         .instance = 2,
         .port = CONFIG_ESP_DAP_2_TCP_PORT,
 #ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
-        .disable_keepalive = false,
         .keepalive_timeout = CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT,
 #else
-        .disable_keepalive = true,
         .keepalive_timeout = 0,
 #endif
         .gpio = {
@@ -236,10 +232,8 @@ static BaseType_t cmsis_dap_tcp_3_task_start(void)
         .instance = 3,
         .port = CONFIG_ESP_DAP_3_TCP_PORT,
 #ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
-        .disable_keepalive = false,
         .keepalive_timeout = CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT,
 #else
-        .disable_keepalive = true,
         .keepalive_timeout = 0,
 #endif
         .gpio = {

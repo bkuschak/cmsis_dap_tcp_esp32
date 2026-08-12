@@ -23,8 +23,7 @@ extern "C" {
 struct cmsis_dap_tcp_config {
     int instance;   // Used for identification in log messages only.
     int port;
-    int disable_keepalive;
-    int keepalive_timeout;
+    int keepalive_timeout;     // seconds; 0 disables keepalive
     struct cmsis_dap_gpio_config gpio;
 };
 

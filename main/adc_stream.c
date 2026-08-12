@@ -413,15 +413,7 @@ static void adc_stream_task(void* arg)
         fprintf(stdout, "ADC stream: client connected %s:%d\n",
                 state.client_ip_str, state.client_port);
 
-        if (config.keepalive_timeout > 0) {
-            int val = 1;
-            setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
-            val = 1;
-            setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val));
-            setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val));
-            val = config.keepalive_timeout;
-            setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
-        }
+        transport_set_keepalives(client_fd, config.keepalive_timeout);
 
         // Reload in case settings changed via console since the last
         // connection. A bad value here only refuses this connection.

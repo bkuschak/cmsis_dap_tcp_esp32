@@ -10,8 +10,8 @@ extern "C" {
 #include <sys/types.h>
 #include "esp_err.h"
 
-// Wraps either a plain socket fd or (once TLS support is added) an fd plus
-// a TLS session, behind one read/write/close API -- so the TCP-serving
+// Wraps either a plain socket fd or, when CONFIG_ESP_TLS_ENABLED, an fd
+// plus a TLS session, behind one read/write/close API -- so the TCP-serving
 // modules (cmsis_dap_tcp, uart_bridge, adc_stream, socket_console) don't
 // need to know or care which one they have.
 typedef struct transport_s *transport_handle_t;
@@ -24,6 +24,12 @@ esp_err_t tls_transport_global_init(void);
 transport_handle_t transport_wrap(int fd);
 
 void transport_set_nonblocking(transport_handle_t t);
+
+// Enables TCP keepalives on a raw fd (1s idle/interval, keepalive_timeout
+// probes before the connection is considered dead), or does nothing if
+// keepalive_timeout <= 0. Independent of TLS -- operates below it either
+// way, so it takes a raw fd rather than a transport_handle_t.
+void transport_set_keepalives(int fd, int keepalive_timeout);
 
 // Raw fd, e.g. for FD_SET()/select().
 int transport_fd(transport_handle_t t);

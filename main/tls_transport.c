@@ -53,17 +53,24 @@ static struct {
 } registry[TRANSPORT_MAX_HANDLES];
 static portMUX_TYPE registry_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static void registry_add(transport_handle_t t)
+// False means the registry is full (TRANSPORT_MAX_HANDLES too small for
+// actual concurrency). The caller must not proceed with an unregistered
+// handle: transport_linenoise_read/write() would fail to find it and fall
+// back to raw fd I/O, silently bypassing TLS if enabled.
+static bool registry_add(transport_handle_t t)
 {
+    bool added = false;
     portENTER_CRITICAL(&registry_mux);
     for (int i = 0; i < TRANSPORT_MAX_HANDLES; i++) {
         if (registry[i].t == NULL) {
             registry[i].fd = t->fd;
             registry[i].t = t;
+            added = true;
             break;
         }
     }
     portEXIT_CRITICAL(&registry_mux);
+    return added;
 }
 
 static void registry_remove(transport_handle_t t)
@@ -119,11 +126,16 @@ static const int ecdsa_ciphersuites[] = {
 };
 #endif
 
+// mbedtls_strerror() only understands its own composite error codes; a raw
+// PSA status code (e.g. from an AEAD op) leaking through prints as a
+// misleading match on unrelated low bits. Printing the decimal value too
+// makes those recognizable (PSA_ERROR_* are small negative ints, see
+// psa/crypto_values.h) without re-deriving it by hand.
 static void log_mbedtls_error(const char *what, int ret)
 {
     char buf[100];
     mbedtls_strerror(ret, buf, sizeof(buf));
-    fprintf(stderr, "tls_transport: %s: %s (-0x%04x)\n", what, buf, -ret);
+    fprintf(stderr, "tls_transport: %s: %s (ret=%d)\n", what, buf, ret);
 }
 
 #endif // CONFIG_ESP_TLS_ENABLED
@@ -247,7 +259,12 @@ transport_handle_t transport_wrap(int fd)
     }
 #endif // CONFIG_ESP_TLS_ENABLED
 
-    registry_add(t);
+    if (!registry_add(t)) {
+        fprintf(stderr, "tls_transport: handle registry full, dropping "
+                "connection.\n");
+        transport_close(t);
+        return NULL;
+    }
     return t;
 }
 
@@ -256,6 +273,20 @@ void transport_set_nonblocking(transport_handle_t t)
     int flags = fcntl(t->fd, F_GETFL, 0);
     if (flags < 0) flags = 0;
     fcntl(t->fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+void transport_set_keepalives(int fd, int keepalive_timeout)
+{
+    if (keepalive_timeout <= 0)
+        return;
+
+    int val = 1;
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
+    val = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val));
+    val = keepalive_timeout;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
 }
 
 int transport_fd(transport_handle_t t)

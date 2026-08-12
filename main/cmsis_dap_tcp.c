@@ -240,29 +240,6 @@ static void set_nonblocking(int fd)
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-static void set_keepalives(int fd, const struct cmsis_dap_tcp_config *config)
-{
-    if (config->disable_keepalive)
-        return;
-
-#ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
-    // Use TCP keepalives to detect dead clients.
-    int val = 1;
-    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
-
-    // Seconds between probes (Linux and ESP32)
-    val = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val));
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val));
-
-    // Number of probes to send before closing the connection.
-    val = config->keepalive_timeout;
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
-
-    LOG_DEBUG("Using TCP keepalives with %d second timeout.", val);
-#endif
-}
-
 static int reserve_resources(struct cmsis_dap_tcp_state *state)
 {
     int slot = -1;
@@ -535,7 +512,14 @@ void cmsis_dap_tcp_task(void *arg)
         if (client_t != NULL) FD_SET(transport_fd(client_t), &read_fds);
         int fdmax = MAX(client_t != NULL ? transport_fd(client_t) : -1, listener_fd);
 
-        int sel = select(fdmax + 1, &read_fds, NULL, NULL, NULL);
+        // If TLS already has a full request buffered above the socket
+        // layer, don't block in select() waiting for more raw bytes that
+        // may never come (the client is waiting on our response) --
+        // poll instead so the pending data gets processed below.
+        struct timeval zero_tv = {0, 0};
+        bool pending = client_t != NULL && transport_has_pending(client_t);
+        int sel = select(fdmax + 1, &read_fds, NULL, NULL,
+                pending ? &zero_tv : NULL);
         if (sel < 0) {
             if (errno == EINTR)
                 continue;
@@ -594,7 +578,7 @@ void cmsis_dap_tcp_task(void *arg)
                             task_state->config->instance);
                     continue;   // restart select() loop; new_fd already closed
                 }
-                set_keepalives(new_fd, config);
+                transport_set_keepalives(new_fd, config->keepalive_timeout);
                 transport_set_nonblocking(new_t);
                 client_t = new_t;
                 msgbuf_init(&state->buf);

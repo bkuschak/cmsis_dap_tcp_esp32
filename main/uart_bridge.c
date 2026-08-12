@@ -468,8 +468,13 @@ static void uart_bridge_task(void* arg)
         int max_fd = MAX(listen_fd,
                 MAX(client_t != NULL ? transport_fd(client_t) : -1, uart_fd));
 
-        // Blocking call to select.
-        int activity = select(max_fd+1, &read_fds, NULL, NULL, NULL);
+        // Blocking call to select -- except if TLS already has a full
+        // request buffered above the socket layer, in which case don't
+        // block waiting for more raw bytes that may never come.
+        struct timeval zero_tv = {0, 0};
+        bool pending = client_t != NULL && transport_has_pending(client_t);
+        int activity = select(max_fd+1, &read_fds, NULL, NULL,
+                pending ? &zero_tv : NULL);
         if (activity < 0) {
             //ESP_LOGE(TAG, "select failed: errno %d", errno);
             fprintf(stderr, "UART bridge %d: select error: %s\n",
@@ -506,22 +511,7 @@ static void uart_bridge_task(void* arg)
                             task_state->config->instance,
                             state.client_ip_str, state.client_port);
 
-                    if(config.keepalive_timeout > 0) {
-                    // Use TCP keepalives to detect dead clients.
-                    int val = 1;
-                    setsockopt(new_fd, SOL_SOCKET, SO_KEEPALIVE, &val,
-                            sizeof(val));
-                    // Seconds between probes (Linux and ESP32)
-                    val = 1;
-                    setsockopt(new_fd, IPPROTO_TCP, TCP_KEEPIDLE, &val,
-                            sizeof(val));
-                    setsockopt(new_fd, IPPROTO_TCP, TCP_KEEPINTVL, &val,
-                            sizeof(val));
-                    // Number of probes to send before closing the connection.
-                    val = config.keepalive_timeout;
-                    setsockopt(new_fd, IPPROTO_TCP, TCP_KEEPCNT, &val,
-                            sizeof(val));
-                    }
+                    transport_set_keepalives(new_fd, config.keepalive_timeout);
                     transport_set_nonblocking(new_t);
                     client_t = new_t;
 

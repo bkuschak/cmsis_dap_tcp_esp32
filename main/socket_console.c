@@ -54,15 +54,7 @@ static void connection_task(void *arg)
     memcpy(client_ip_str, args->client_ip_str, sizeof(client_ip_str));
     free(args);
 
-    if (config.keepalive_timeout > 0) {
-        int val = 1;
-        setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
-        val = 1;
-        setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val));
-        setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val));
-        val = config.keepalive_timeout;
-        setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
-    }
+    transport_set_keepalives(client_fd, config.keepalive_timeout);
 
     transport_handle_t t = transport_wrap(client_fd);
     if (t == NULL) {
