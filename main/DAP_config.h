@@ -42,6 +42,7 @@
 
 #include <driver/gpio.h>
 #include <hal/gpio_ll.h>
+#include <esp_app_desc.h>
 #include <esp_cpu.h>
 #include <esp_mac.h>
 #include <soc/gpio_struct.h>
@@ -352,18 +353,13 @@ __STATIC_INLINE uint8_t DAP_GetTargetBoardNameString (char *str)
 */
 __STATIC_INLINE uint8_t DAP_GetProductFirmwareVersionString (char *str)
 {
-#if defined(GIT_DATE) && defined(GIT_HASH) && defined(GIT_STATUS)
-    // GIT_DATE, GIT_HASH, and GIT_STATUS are set by CMakeLists.txt
-    snprintf(str, 60, "%s %s%s%s",
-            GIT_DATE,
-            GIT_HASH,
-            (strlen(GIT_STATUS) > 0) ? "-" : "",
-            GIT_STATUS);
-    return strlen(str) + 1;
-#else
-    (void)str;
-    return (0U);
-#endif
+    // For consistency, use the standard ESP-IDF version string.
+    // esp_app_desc.version is PROJECT_VER (`git describe --always --tags
+    // --dirty`), embedded in the app image header at build time.
+    const esp_app_desc_t *desc = esp_app_get_description();
+    strncpy(str, desc->version, 60);
+    str[59] = '\0';
+    return (uint8_t)(strlen(str) + 1);
 }
 
 ///@}

@@ -14,7 +14,7 @@ if(CMAKE_PROJECT_NAME STREQUAL "cmsis_dap_tcp_esp32")
     list(APPEND COMPONENT_SRCS "main.c")
 endif()
 
-set(PRIV_REQUIRES "spi_flash" "esp_driver_gpio" "esp_adc")
+set(PRIV_REQUIRES "spi_flash" "esp_driver_gpio" "esp_adc" "esp_app_format")
 
 # esp_wifi unconditional: REQUIRES resolves before sdkconfig is available.
 set(REQUIRES
@@ -64,15 +64,4 @@ idf_component_register(SRCS ${COMPONENT_SRCS}
                        PRIV_REQUIRES ${PRIV_REQUIRES}
                        REQUIRES ${REQUIRES}
                        INCLUDE_DIRS ".")
-
-# Allow git hash to be embedded in the DAP_ID_PRODUCT_FW_VER string.
-include("${COMPONENT_DIR}/git_version.cmake")
-
-target_compile_definitions(${COMPONENT_LIB} PRIVATE
-    -DGIT_HASH="${GIT_HASH}"
-    -DGIT_DATE="${GIT_DATE}"
-    -DGIT_STATUS="${GIT_STATUS}"
-)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/.git/index")
 
