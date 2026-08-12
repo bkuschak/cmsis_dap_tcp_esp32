@@ -406,7 +406,14 @@ ssize_t transport_linenoise_read(int fd, void *buf, size_t count)
     transport_handle_t t = registry_find(fd);
     if (t == NULL)
         return read(fd, buf, count);   // shouldn't happen; fall back to plain read
-    return transport_read(t, buf, count);
+    ssize_t n = transport_read(t, buf, count);
+    // esp_linenoise_dumb() only stops on a negative return, not 0/EOF --
+    // translate so a closed connection doesn't spin it forever.
+    if (n == 0) {
+        errno = ECONNRESET;
+        return -1;
+    }
+    return n;
 }
 
 ssize_t transport_linenoise_write(int fd, const void *buf, size_t count)
