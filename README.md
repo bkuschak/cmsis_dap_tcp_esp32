@@ -30,6 +30,8 @@ board.
   serial console remotely, using an ESP32 UART.
 - Up to 3 independent JTAG/SWD interfaces can be supported simultaneously.
 - Up to 3 independent UART bridges can be supported simultaneously.
+- Optional mutual TLS (mTLS) to authenticate clients and encrypt all TCP
+  traffic.
 - Typical performance:
   - SWD reading / writing SRAM: up to 200 KB/sec
   - SWD flashing a 512 KB firmware image to the STM32F401RE
@@ -162,6 +164,14 @@ idf.py fullclean menuconfig build flash
    CMSIS-DAP config → UART Bridge → Select GPIO numbers → enabled
    CMSIS-DAP config → UART Bridge → UART TX → (choose an available GPIO)
    CMSIS-DAP config → UART Bridge → UART RX → (choose an available GPIO)
+   ```
+
+* Optional mutual TLS (mTLS) authenticates clients and encrypts all TCP
+  traffic. See [main/certs/README.md](main/certs/README.md) for more
+  information.
+
+   ```
+   CMSIS-DAP config → Client authentication → Require certificates to connect (mutual TLS)
    ```
 
 * It is also possible to stream voltage measurements from one ADC channel over
