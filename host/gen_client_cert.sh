@@ -6,7 +6,10 @@
 # many times as needed without touching the ESP32's embedded certs.
 #
 # Usage: ./gen_client_cert.sh <name>
-#   e.g. ./gen_client_cert.sh alice   ->  host/certs/alice.pem, alice.key
+#   <name> should be the person's actual name or another ID meaningful to
+#   you -- it becomes the cert's Common Name. Quote it to use a first +
+#   last name:
+#     ./gen_client_cert.sh "Alice Smith"  ->  host/certs/Alice Smith.pem, .key
 #
 # You may pass OUT_DIR as an environment variable (must already contain
 # ca.key/cacert.pem from gen_esp32_certs.sh).

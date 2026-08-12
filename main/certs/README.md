@@ -18,17 +18,19 @@ project's deployment model expects.
 Fine for testing, or a small deployment where you're fine trusting this
 project's scripts as your PKI. Run from the repo root:
 
+Real names don't matter here -- any label works:
+
 ```sh
-./host/gen_esp32_certs.sh          # generates a CA + this ESP32's server cert
-./host/gen_client_cert.sh alice    # issues alice's client cert, signed by that CA
-./host/gen_client_cert.sh bob      # issues bob's, same CA
+./host/gen_esp32_certs.sh            # generates a CA + this ESP32's server cert
+./host/gen_client_cert.sh "User 1"    # issues a client cert, signed by that CA
+./host/gen_client_cert.sh "User 2"    # issues a second, same CA
 ```
 
 Each person then points `run_stunnel.sh` at their own cert:
 
 ```sh
-CLIENT_NAME=alice HOST=<esp32-ip-or-hostname> ./host/run_stunnel.sh
-CLIENT_NAME=bob   HOST=<esp32-ip-or-hostname> ./host/run_stunnel.sh
+CLIENT_NAME="User 1" HOST=<esp32-ip-or-hostname> ./host/run_stunnel.sh
+CLIENT_NAME="User 2" HOST=<esp32-ip-or-hostname> ./host/run_stunnel.sh
 ```
 
 `gen_esp32_certs.sh` is idempotent -- safe to build/reflash repeatedly
@@ -42,13 +44,17 @@ and are willing to hand its private key to `gen_esp32_certs.sh` so it can
 sign the ESP32's cert (and `gen_client_cert.sh` can keep signing new client
 certs without your involvement each time).
 
+Here the client's name is its identity, so use the person's actual name
+(quoted, so first + last name works) or another ID meaningful to you:
+
 ```sh
 mkdir -p host/certs
 cp /path/to/your/ca.key    host/certs/ca.key
 cp /path/to/your/cacert.pem host/certs/cacert.pem
 
-./host/gen_esp32_certs.sh          # detects your CA, reuses it, signs a new server cert
-./host/gen_client_cert.sh alice    # signed by your CA too
+./host/gen_esp32_certs.sh              # detects your CA, reuses it, signs a new server cert
+./host/gen_client_cert.sh "Alice Smith"    # signed by your CA too
+./host/gen_client_cert.sh "Bob Jones"
 ```
 
 ## Workflow 3: your own PKI provides everything, including the ESP32 cert
