@@ -529,9 +529,17 @@ void app_main(void)
         fprintf(stderr, "Get flash size failed\n");
         return;
     }
-    printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
+    // esp_flash_get_size() returns the size baked into the app image header
+    // by CONFIG_ESPTOOLPY_FLASHSIZE, clamped to that value even if the chip
+    // is bigger. esp_flash_get_physical_size() probes the actual chip via
+    // JEDEC ID instead.
+    uint32_t flash_size_probed = 0;
+    esp_flash_get_physical_size(NULL, &flash_size_probed);
+    printf("%" PRIu32 "MB %s flash (phys), %" PRIu32 "MB (configured)\n",
+           flash_size_probed / (uint32_t)(1024 * 1024),
            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" :
-           "external");
+           "external",
+           flash_size / (uint32_t)(1024 * 1024));
     printf("Minimum free heap size: %" PRIu32 " bytes\n",
             esp_get_minimum_free_heap_size());
 
