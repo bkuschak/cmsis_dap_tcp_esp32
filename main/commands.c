@@ -677,6 +677,19 @@ static bool peer_closed(int fd)
     return false;
 }
 
+// esp_linenoise_dumb() (vendored) only stops on a negative read_bytes_cb
+// return, not 0/EOF -- translate so a closed connection doesn't spin it
+// forever re-reading EOF.
+static ssize_t socket_read_bytes(int fd, void *buf, size_t count)
+{
+    ssize_t n = read(fd, buf, count);
+    if (n == 0) {
+        errno = ECONNRESET;
+        return -1;
+    }
+    return n;
+}
+
 // Runs one socket connection's REPL to completion. f/fd remain owned by
 // the caller throughout.
 void process_socket_commands(FILE *f)
@@ -697,6 +710,7 @@ void process_socket_commands(FILE *f)
     ln_config.out_fd = fd;
     ln_config.completion_cb = commands_complete_socket;
     ln_config.allow_dumb_mode = true;  // plain clients (e.g. netcat) don't speak ANSI
+    ln_config.read_bytes_cb = socket_read_bytes;
 
     esp_linenoise_handle_t handle;
     if (esp_linenoise_create_instance(&ln_config, &handle) != ESP_OK) {
