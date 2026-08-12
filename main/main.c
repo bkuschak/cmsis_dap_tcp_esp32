@@ -55,6 +55,7 @@
 #include "uart_bridge.h"
 #include "commands.h"
 #include "reboot.h"
+#include "tls_transport.h"
 
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
 #include "wifi.h"
@@ -578,6 +579,11 @@ void app_main(void)
         reboot();
     }
 #endif
+
+    if (tls_transport_global_init() != ESP_OK) {
+        fprintf(stderr, "Failed to initialize TLS; restarting.\n");
+        reboot();
+    }
 
     if(cmsis_dap_tcp_task_start() != pdPASS) {
         fprintf(stderr, "Failed to start CMSIS-DAP-TCP task.\n");

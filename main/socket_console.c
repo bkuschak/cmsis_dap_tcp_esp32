@@ -26,7 +26,14 @@
 
 #define LISTEN_TASK_STACK_SIZE     4096
 #define LISTEN_TASK_PRIORITY       5
+// The TLS handshake (ECDHE + certificate parsing) runs inline in this
+// task; give it the same headroom as the other services' tasks even
+// though it happened to survive at 4096 in testing (uart_bridge did not).
+#if CONFIG_ESP_TLS_ENABLED
+#define CONNECTION_TASK_STACK_SIZE 8192
+#else
 #define CONNECTION_TASK_STACK_SIZE 4096
+#endif
 #define CONNECTION_TASK_PRIORITY   5
 #define LISTEN_BACKLOG             4
 

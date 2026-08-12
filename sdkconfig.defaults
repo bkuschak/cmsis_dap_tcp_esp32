@@ -10,3 +10,11 @@ CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=12
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+# mbedTLS tuning (only exercised once CONFIG_ESP_TLS_ENABLED=y). Buffer
+# sized to the max TLS record (16384): a smaller one caused real
+# mid-connection failures under bulk traffic. No cert bundle needed (no
+# outbound HTTPS/OTA), saves flash.
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=16384
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=n

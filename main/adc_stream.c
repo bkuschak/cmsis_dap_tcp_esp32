@@ -39,7 +39,15 @@
 #include "adc_stream.h"
 #include "tls_transport.h"
 
+// The TLS handshake (ECDHE + certificate parsing) runs inline in this
+// task and needs substantially more stack than the rest of the task ever
+// used before -- a plain 4096 overflowed and crashed the task in testing
+// (uart_bridge, same shape of task loop, same stack size).
+#if CONFIG_ESP_TLS_ENABLED
+#define ADC_STREAM_TASK_STACK_SIZE     8192
+#else
 #define ADC_STREAM_TASK_STACK_SIZE     4096
+#endif
 #define ADC_STREAM_TASK_PRIORITY       5
 #define ADC_STREAM_MAX_TASKS           1   // ADC1 is a single shared peripheral
 

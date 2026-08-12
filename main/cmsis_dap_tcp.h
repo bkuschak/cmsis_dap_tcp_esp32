@@ -10,7 +10,14 @@ extern "C" {
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+// The TLS handshake (ECDHE + certificate parsing) runs inline in this
+// task and needs substantially more stack than the rest of the task ever
+// used before -- a plain 4096 overflowed and crashed the task in testing.
+#if CONFIG_ESP_TLS_ENABLED
+#define CMSIS_DAP_TCP_TASK_STACK_SIZE 8192
+#else
 #define CMSIS_DAP_TCP_TASK_STACK_SIZE 4096
+#endif
 #define CMSIS_DAP_TCP_TASK_PRIORITY 5
 
 struct cmsis_dap_tcp_config {

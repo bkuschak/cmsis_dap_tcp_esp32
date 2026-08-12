@@ -1045,6 +1045,51 @@ menu "CMSIS-DAP configuration"
 
     endmenu
 
+    menu "Client authentication (TLS)"
+
+        config ESP_TLS_ENABLED
+            bool "Require client certificates to connect (mutual TLS)"
+            default n
+            select MBEDTLS_SSL_KEEP_PEER_CERTIFICATE
+            help
+                Requires TLS 1.2 with mutual certificate authentication
+                on every TCP service in this project (client certs
+                verified against an embedded CA) -- for both access
+                control and confidentiality.
+
+                Single global build-time toggle: no per-service mixing,
+                no runtime switch. Certs are compiled in from
+                main/certs/ (see its README) -- no NVS or console way
+                to change them.
+
+        if ESP_TLS_ENABLED
+
+            config ESP_TLS_ECDSA_ONLY_CIPHERSUITES
+                bool "Restrict TLS handshake to ECDSA cipher suites"
+                default y
+                help
+                    Limits the negotiated cipher suite to ECDHE-ECDSA,
+                    which handshakes noticeably faster on the ESP32's CPU
+                    than RSA. Requires the embedded server certificate,
+                    and any client certificate it will be asked to
+                    verify, to use EC (not RSA) keys. Disable this only
+                    if you need to use RSA certificates.
+
+            config ESP_TLS_HANDSHAKE_TIMEOUT_MS
+                int "TLS handshake timeout (milliseconds)"
+                default 5000
+                help
+                    Maximum time to wait for a client to complete the TLS
+                    handshake after its TCP connection is accepted. Most
+                    of this project's TCP services accept only one client
+                    at a time; without this bound, a client that opens a
+                    TCP connection but stalls before/during the TLS
+                    handshake would block that service indefinitely.
+
+        endif
+
+    endmenu
+
     config ESP_DAP_VENDOR_ID
         string "CMSIS-DAP vendor string"
         default "OpenOCD"

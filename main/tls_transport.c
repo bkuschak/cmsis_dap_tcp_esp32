@@ -7,8 +7,11 @@
  * a uniform read/write/close API so those modules don't need to know
  * whether TLS is in use.
  *
- * This is currently a pure passthrough to plain sockets -- TLS support is
- * added in a later change.
+ * CONFIG_ESP_TLS_ENABLED is a single global build-time switch: when off,
+ * this is a pure passthrough to plain sockets; when on, every connection
+ * requires a mutually-authenticated TLS 1.2 handshake before any
+ * application data is exchanged. There is no per-connection or runtime
+ * choice between the two.
  */
 
 #include <errno.h>
@@ -22,6 +25,15 @@
 #include "freertos/task.h"
 #include "tls_transport.h"
 
+#if CONFIG_ESP_TLS_ENABLED
+#include "mbedtls/error.h"
+#include "mbedtls/net_sockets.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/x509_crt.h"
+#include "psa/crypto.h"
+#endif
+
 // Bounds the fd->handle registry used by transport_linenoise_read/write().
 // Generous vs. actual concurrency: up to 3 CMSIS-DAP + 3 UART bridge + 1 ADC
 // instances, plus however many simultaneous socket console connections.
@@ -29,6 +41,10 @@
 
 struct transport_s {
     int fd;
+#if CONFIG_ESP_TLS_ENABLED
+    mbedtls_net_context net;   // wraps fd for mbedtls_net_send/recv's bio ctx
+    mbedtls_ssl_context ssl;
+#endif
 };
 
 static struct {
@@ -77,8 +93,100 @@ static transport_handle_t registry_find(int fd)
     return found;
 }
 
+#if CONFIG_ESP_TLS_ENABLED
+
+// Symbols for the PEM files embedded via EMBED_TXTFILES in
+// main/CMakeLists.txt (main/certs/*.pem -- see that directory's README).
+extern const uint8_t servercert_pem_start[] asm("_binary_servercert_pem_start");
+extern const uint8_t servercert_pem_end[]   asm("_binary_servercert_pem_end");
+extern const uint8_t prvtkey_pem_start[]    asm("_binary_prvtkey_pem_start");
+extern const uint8_t prvtkey_pem_end[]      asm("_binary_prvtkey_pem_end");
+extern const uint8_t cacert_pem_start[]     asm("_binary_cacert_pem_start");
+extern const uint8_t cacert_pem_end[]       asm("_binary_cacert_pem_end");
+
+static mbedtls_x509_crt server_cert;
+static mbedtls_pk_context server_key;
+static mbedtls_x509_crt ca_cert;
+static mbedtls_ssl_config conf;
+
+// ECDHE-ECDSA only (CONFIG_ESP_TLS_ECDSA_ONLY_CIPHERSUITES): much cheaper
+// to handshake on this CPU than RSA. 0-terminated, per mbedtls's API.
+#if CONFIG_ESP_TLS_ECDSA_ONLY_CIPHERSUITES
+static const int ecdsa_ciphersuites[] = {
+    MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+    MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+    0,
+};
+#endif
+
+static void log_mbedtls_error(const char *what, int ret)
+{
+    char buf[100];
+    mbedtls_strerror(ret, buf, sizeof(buf));
+    fprintf(stderr, "tls_transport: %s: %s (-0x%04x)\n", what, buf, -ret);
+}
+
+#endif // CONFIG_ESP_TLS_ENABLED
+
 esp_err_t tls_transport_global_init(void)
 {
+#if CONFIG_ESP_TLS_ENABLED
+    // mbedTLS 4.x / PSA Crypto: RNG is implicit once the PSA subsystem is
+    // initialized -- no more manual mbedtls_ctr_drbg/entropy seeding or
+    // mbedtls_ssl_conf_rng(), both removed from this mbedTLS version.
+    psa_status_t psa_ret = psa_crypto_init();
+    if (psa_ret != PSA_SUCCESS) {
+        fprintf(stderr, "tls_transport: psa_crypto_init failed: %d\n", (int)psa_ret);
+        return ESP_FAIL;
+    }
+
+    mbedtls_x509_crt_init(&server_cert);
+    int ret = mbedtls_x509_crt_parse(&server_cert, servercert_pem_start,
+            servercert_pem_end - servercert_pem_start);
+    if (ret != 0) {
+        log_mbedtls_error("failed to parse server cert", ret);
+        return ESP_FAIL;
+    }
+
+    mbedtls_pk_init(&server_key);
+    ret = mbedtls_pk_parse_key(&server_key, prvtkey_pem_start,
+            prvtkey_pem_end - prvtkey_pem_start, NULL, 0);
+    if (ret != 0) {
+        log_mbedtls_error("failed to parse server private key", ret);
+        return ESP_FAIL;
+    }
+
+    mbedtls_x509_crt_init(&ca_cert);
+    ret = mbedtls_x509_crt_parse(&ca_cert, cacert_pem_start,
+            cacert_pem_end - cacert_pem_start);
+    if (ret != 0) {
+        log_mbedtls_error("failed to parse CA cert", ret);
+        return ESP_FAIL;
+    }
+
+    mbedtls_ssl_config_init(&conf);
+    ret = mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_SERVER,
+            MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
+    if (ret != 0) {
+        log_mbedtls_error("ssl_config_defaults failed", ret);
+        return ESP_FAIL;
+    }
+
+    // Require and verify a client cert -- this is what makes it mutual
+    // TLS / access control, not just confidentiality.
+    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_ca_chain(&conf, &ca_cert, NULL);
+    mbedtls_ssl_conf_own_cert(&conf, &server_cert, &server_key);
+
+    mbedtls_ssl_conf_min_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_2);
+    mbedtls_ssl_conf_max_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_2);
+
+#if CONFIG_ESP_TLS_ECDSA_ONLY_CIPHERSUITES
+    mbedtls_ssl_conf_ciphersuites(&conf, ecdsa_ciphersuites);
+#endif
+
+    printf("TLS: mutual TLS enabled; server cert/CA loaded.\n");
+#endif // CONFIG_ESP_TLS_ENABLED
     return ESP_OK;
 }
 
@@ -90,6 +198,55 @@ transport_handle_t transport_wrap(int fd)
         return NULL;
     }
     t->fd = fd;
+
+#if CONFIG_ESP_TLS_ENABLED
+    t->net.fd = fd;
+    mbedtls_ssl_init(&t->ssl);
+    int ret = mbedtls_ssl_setup(&t->ssl, &conf);
+    if (ret != 0) {
+        log_mbedtls_error("ssl_setup failed", ret);
+        mbedtls_ssl_free(&t->ssl);
+        close(fd);
+        free(t);
+        return NULL;
+    }
+    mbedtls_ssl_set_bio(&t->ssl, &t->net, mbedtls_net_send, mbedtls_net_recv, NULL);
+
+    // Bound the handshake -- most of this project's services accept only
+    // one client at a time, so a client that opens the TCP connection but
+    // never sends a ClientHello would otherwise wedge that service
+    // indefinitely. Timeouts only apply for the handshake; cleared before
+    // the connection enters its normal (non-blocking) data phase.
+    struct timeval tv = {
+        .tv_sec = CONFIG_ESP_TLS_HANDSHAKE_TIMEOUT_MS / 1000,
+        .tv_usec = (CONFIG_ESP_TLS_HANDSHAKE_TIMEOUT_MS % 1000) * 1000,
+    };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    do {
+        ret = mbedtls_ssl_handshake(&t->ssl);
+    } while (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE);
+
+    struct timeval no_tv = {0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &no_tv, sizeof(no_tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &no_tv, sizeof(no_tv));
+
+    if (ret != 0) {
+        log_mbedtls_error("TLS handshake failed", ret);
+        mbedtls_ssl_free(&t->ssl);
+        close(fd);
+        free(t);
+        return NULL;
+    }
+    const mbedtls_x509_crt *peer = mbedtls_ssl_get_peer_cert(&t->ssl);
+    if (peer != NULL) {
+        char subject[128];
+        mbedtls_x509_dn_gets(subject, sizeof(subject), &peer->subject);
+        printf("TLS: client authenticated, cert subject: %s\n", subject);
+    }
+#endif // CONFIG_ESP_TLS_ENABLED
+
     registry_add(t);
     return t;
 }
@@ -108,12 +265,42 @@ int transport_fd(transport_handle_t t)
 
 ssize_t transport_read(transport_handle_t t, void *buf, size_t len)
 {
+#if CONFIG_ESP_TLS_ENABLED
+    int ret = mbedtls_ssl_read(&t->ssl, buf, len);
+    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+        errno = EAGAIN;
+        return -1;
+    }
+    if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+        return 0;
+    if (ret < 0) {
+        log_mbedtls_error("ssl_read failed", ret);
+        errno = ECONNRESET;
+        return -1;
+    }
+    return ret;
+#else
     return recv(t->fd, buf, len, 0);
+#endif
 }
 
 ssize_t transport_write(transport_handle_t t, const void *buf, size_t len)
 {
+#if CONFIG_ESP_TLS_ENABLED
+    int ret = mbedtls_ssl_write(&t->ssl, buf, len);
+    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+        errno = EAGAIN;
+        return -1;
+    }
+    if (ret < 0) {
+        log_mbedtls_error("ssl_write failed", ret);
+        errno = ECONNRESET;
+        return -1;
+    }
+    return ret;
+#else
     return send(t->fd, buf, len, 0);
+#endif
 }
 
 int transport_write_all(transport_handle_t t, const void *buf, size_t len)
@@ -127,14 +314,19 @@ int transport_write_all(transport_handle_t t, const void *buf, size_t len)
             if (errno == EINTR)
                 continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Non-blocking socket with a full send buffer (or, once TLS
-                // is added, a WANT_WRITE mid-handshake): wait briefly and
-                // retry rather than treating this as fatal. A genuinely
-                // dead peer is eventually caught here too, since TCP
-                // keepalives (configured by each module right after
-                // accept()) will turn into a real send() error once probes
-                // are exhausted.
-                vTaskDelay(pdMS_TO_TICKS(1));
+                // Non-blocking socket with a full send buffer, or mbedTLS
+                // signaling WANT_READ/WANT_WRITE mid-record: wait briefly
+                // and retry (with the same buf/len, satisfying mbedTLS's
+                // retry contract) rather than treating this as fatal. A
+                // genuinely dead peer is eventually caught here too, since
+                // TCP keepalives (configured by each module right after
+                // accept()) turn into a real error once probes are
+                // exhausted.
+                // pdMS_TO_TICKS(1) truncates to 0 at this project's 100Hz
+                // tick rate, which would turn this into a busy taskYIELD()
+                // spin instead of a real wait -- force at least 1 tick.
+                TickType_t delay_ticks = pdMS_TO_TICKS(1);
+                vTaskDelay(delay_ticks > 0 ? delay_ticks : 1);
                 continue;
             }
             return -1;
@@ -157,8 +349,12 @@ bool transport_peer_closed(transport_handle_t t)
 
 bool transport_has_pending(transport_handle_t t)
 {
+#if CONFIG_ESP_TLS_ENABLED
+    return mbedtls_ssl_check_pending(&t->ssl) != 0;
+#else
     (void)t;
-    return false;   // no TLS layer yet to have buffered application data
+    return false;
+#endif
 }
 
 void transport_close(transport_handle_t t)
@@ -166,6 +362,10 @@ void transport_close(transport_handle_t t)
     if (t == NULL)
         return;
     registry_remove(t);
+#if CONFIG_ESP_TLS_ENABLED
+    mbedtls_ssl_close_notify(&t->ssl);   // best-effort
+    mbedtls_ssl_free(&t->ssl);
+#endif
     close(t->fd);
     free(t);
 }

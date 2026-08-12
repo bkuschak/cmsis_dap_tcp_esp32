@@ -60,7 +60,14 @@
 #define UART_CONFIG_NVS_KEY_PARITY      "parity"
 #define UART_CONFIG_NVS_KEY_STOP_BITS   "stop_bits"
 
+// The TLS handshake (ECDHE + certificate parsing) runs inline in this
+// task and needs substantially more stack than the rest of the task ever
+// used before -- a plain 4096 overflowed and crashed the task in testing.
+#if CONFIG_ESP_TLS_ENABLED
+#define UART_BRIDGE_TASK_STACK_SIZE     8192
+#else
 #define UART_BRIDGE_TASK_STACK_SIZE     4096
+#endif
 #define UART_BRIDGE_TASK_PRIORITY       5
 #define UART_BRIDGE_MAX_TASKS           4
 

@@ -4,3 +4,5 @@ build*/
 managed_components/
 dependencies.lock
 .cache/
+main/certs/*.pem
+host/certs/
