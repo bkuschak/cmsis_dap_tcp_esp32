@@ -22,6 +22,7 @@
 
 #include "commands.h"
 #include "socket_console.h"
+#include "tls_transport.h"
 
 #define LISTEN_TASK_STACK_SIZE     4096
 #define LISTEN_TASK_PRIORITY       5
@@ -56,19 +57,26 @@ static void connection_task(void *arg)
         setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
     }
 
-    FILE *f = fdopen(client_fd, "r+");
-    if (f == NULL) {
-        fprintf(stderr, "Socket console: fdopen failed: %s\n", strerror(errno));
-        close(client_fd);
+    transport_handle_t t = transport_wrap(client_fd);
+    if (t == NULL) {
+        fprintf(stderr, "Socket console: transport setup failed.\n");
         vTaskDelete(NULL);
         return;
     }
 
-    process_socket_commands(f);
+    FILE *f = transport_fopen(t);
+    if (f == NULL) {
+        fprintf(stderr, "Socket console: fdopen failed: %s\n", strerror(errno));
+        transport_close(t);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    process_socket_commands(f, t);
 
     printf("Socket console: client disconnected %s:%d\n", client_ip_str,
             client_port);
-    fclose(f);      // also closes client_fd
+    fclose(f);      // also closes the transport session (and its fd)
     vTaskDelete(NULL);
 }
 

@@ -45,6 +45,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/unistd.h>
+#include "tls_transport.h"
 #include "uart_bridge.h"
 
 #define BUFFER_SIZE         512
@@ -445,7 +446,7 @@ static void uart_bridge_task(void* arg)
 
     // Select() loop blocks until activity on sockets or UART.
     struct sockaddr_in client_addr;
-    int client_fd = -1;
+    transport_handle_t client_t = NULL;
     int uart_fd = -1;
     while (1) {
         fd_set read_fds;
@@ -453,11 +454,12 @@ static void uart_bridge_task(void* arg)
 
         // Add listening socket and client socket to read_fds.
         FD_SET(listen_fd, &read_fds);
-        if(client_fd >= 0)
-            FD_SET(client_fd, &read_fds);
+        if(client_t != NULL)
+            FD_SET(transport_fd(client_t), &read_fds);
         if(uart_fd >= 0)
             FD_SET(uart_fd, &read_fds);
-        int max_fd = MAX(listen_fd, MAX(client_fd, uart_fd));
+        int max_fd = MAX(listen_fd,
+                MAX(client_t != NULL ? transport_fd(client_t) : -1, uart_fd));
 
         // Blocking call to select.
         int activity = select(max_fd+1, &read_fds, NULL, NULL, NULL);
@@ -481,10 +483,15 @@ static void uart_bridge_task(void* arg)
                 }
             }
             else {
-                if(client_fd < 0) {
+                if(client_t == NULL) {
                     // New client.
-                    fcntl(new_fd, F_SETFL, O_NONBLOCK);
-                    client_fd = new_fd;
+                    transport_handle_t new_t = transport_wrap(new_fd);
+                    if (new_t == NULL) {
+                        fprintf(stderr, "UART bridge %d: transport setup "
+                                "failed, dropping client.\n",
+                                task_state->config->instance);
+                        continue;   // new_fd already closed
+                    }
                     inet_ntop(AF_INET, &client_addr.sin_addr, state.client_ip_str,
                             sizeof(state.client_ip_str));
                     state.client_port = ntohs(client_addr.sin_port);
@@ -495,19 +502,21 @@ static void uart_bridge_task(void* arg)
                     if(config.keepalive_timeout > 0) {
                     // Use TCP keepalives to detect dead clients.
                     int val = 1;
-                    setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &val,
+                    setsockopt(new_fd, SOL_SOCKET, SO_KEEPALIVE, &val,
                             sizeof(val));
                     // Seconds between probes (Linux and ESP32)
                     val = 1;
-                    setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPIDLE, &val,
+                    setsockopt(new_fd, IPPROTO_TCP, TCP_KEEPIDLE, &val,
                             sizeof(val));
-                    setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPINTVL, &val,
+                    setsockopt(new_fd, IPPROTO_TCP, TCP_KEEPINTVL, &val,
                             sizeof(val));
                     // Number of probes to send before closing the connection.
                     val = config.keepalive_timeout;
-                    setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPCNT, &val,
+                    setsockopt(new_fd, IPPROTO_TCP, TCP_KEEPCNT, &val,
                             sizeof(val));
                     }
+                    transport_set_nonblocking(new_t);
+                    client_t = new_t;
 
                     // Reapply UART settings now, in case they were changed
                     // via the console since the last connection (or since
@@ -520,8 +529,8 @@ static void uart_bridge_task(void* arg)
                         fprintf(stderr, "UART bridge %d: failed opening "
                                 "UART%d: %s\n", task_state->config->instance,
                                 config.uart_num, strerror(errno));
-                        close(client_fd);
-                        client_fd = -1;
+                        transport_close(client_t);
+                        client_t = NULL;
                     }
 
                     int flags = fcntl(uart_fd, F_GETFL, 0);
@@ -544,17 +553,18 @@ static void uart_bridge_task(void* arg)
         }
 
         // Handle client socket.
-        if(client_fd > 0 && FD_ISSET(client_fd, &read_fds)) {
-            ret = recv(client_fd, state.buffer, sizeof(state.buffer)-1, 0);
+        if(client_t != NULL && (FD_ISSET(transport_fd(client_t), &read_fds) ||
+                transport_has_pending(client_t))) {
+            ret = transport_read(client_t, state.buffer, sizeof(state.buffer)-1);
             if(ret == 0 ||
               (ret < 0 && (errno == ECONNRESET || errno == ECONNABORTED ||
                            errno == ENOTCONN))) {
                 // Client has disconnected.
                 fprintf(stdout, "UART bridge %d: client disconnected.\n",
                         task_state->config->instance);
-                close(client_fd);
+                transport_close(client_t);
                 close(uart_fd);
-                client_fd = -1;
+                client_t = NULL;
                 uart_fd = -1;
                 state.count_rx = 0;
                 state.count_tx = 0;
@@ -583,7 +593,9 @@ static void uart_bridge_task(void* arg)
             }
             else {
                 state.count_rx += ret;
-                send(client_fd, state.buffer, ret, 0);
+                if (transport_write_all(client_t, state.buffer, ret) != 0)
+                    fprintf(stderr, "UART bridge %d: socket write error: %s\n",
+                            task_state->config->instance, strerror(errno));
             }
         }
     }
@@ -594,8 +606,8 @@ static void uart_bridge_task(void* arg)
     state.count_rx = 0;
     state.count_tx = 0;
 
-    if(client_fd >= 0)
-        close(client_fd);
+    if(client_t != NULL)
+        transport_close(client_t);
     if(uart_fd >= 0)
         close(uart_fd);
     close(listen_fd);

@@ -37,6 +37,7 @@
 #include <sys/socket.h>
 #include <sys/unistd.h>
 #include "adc_stream.h"
+#include "tls_transport.h"
 
 #define ADC_STREAM_TASK_STACK_SIZE     4096
 #define ADC_STREAM_TASK_PRIORITY       5
@@ -390,7 +391,13 @@ static void adc_stream_task(void* arg)
             fprintf(stderr, "ADC stream: accept error: %s\n", strerror(errno));
             continue;
         }
-        fcntl(client_fd, F_SETFL, O_NONBLOCK);
+        transport_handle_t client_t = transport_wrap(client_fd);
+        if (client_t == NULL) {
+            fprintf(stderr, "ADC stream: transport setup failed, dropping "
+                    "client.\n");
+            continue;   // client_fd already closed
+        }
+        transport_set_nonblocking(client_t);
 
         inet_ntop(AF_INET, &client_addr.sin_addr, state.client_ip_str,
                 sizeof(state.client_ip_str));
@@ -414,7 +421,7 @@ static void adc_stream_task(void* arg)
 
         adc_channel_t channel;
         if (!resolve_adc1_channel(state.active_gpio, &channel)) {
-            close(client_fd);
+            transport_close(client_t);
             continue;
         }
 
@@ -424,7 +431,7 @@ static void adc_stream_task(void* arg)
             fprintf(stderr, "ADC stream: averaging (%d) must be a power of "
                     "2 (the accumulate-and-shift oversampling below relies "
                     "on it).\n", state.active_averaging_count);
-            close(client_fd);
+            transport_close(client_t);
             continue;
         }
 
@@ -438,7 +445,7 @@ static void adc_stream_task(void* arg)
                     state.active_sample_rate_hz, state.active_averaging_count,
                     raw_sample_freq_hz, SOC_ADC_SAMPLE_FREQ_THRES_LOW,
                     SOC_ADC_SAMPLE_FREQ_THRES_HIGH);
-            close(client_fd);
+            transport_close(client_t);
             continue;
         }
 
@@ -540,7 +547,7 @@ static void adc_stream_task(void* arg)
         while (1) {
             // Check for client disconnect / error without blocking.
             char discard[16];
-            ret = recv(client_fd, discard, sizeof(discard), MSG_DONTWAIT);
+            ret = transport_read(client_t, discard, sizeof(discard));
             if (ret == 0 ||
                     (ret < 0 && (errno == ECONNRESET || errno == ENOTCONN ||
                                  errno == ECONNABORTED))) {
@@ -632,13 +639,13 @@ static void adc_stream_task(void* arg)
                         (uint8_t)(((int16_t)mv) & 0xff),
                         (uint8_t)(((int16_t)mv) >> 8),
                     };
-                    ret = send(client_fd, out, sizeof(out), 0);
+                    ret = transport_write(client_t, out, sizeof(out));
                     if (ret > 0)
                         state.count_tx += ret;
                 } else {
                     char out[16];
                     int len = snprintf(out, sizeof(out), "%d\n", mv);
-                    ret = send(client_fd, out, len, 0);
+                    ret = transport_write(client_t, out, len);
                     if (ret > 0)
                         state.count_tx += ret;
                 }
@@ -661,7 +668,7 @@ disconnect:
         free(raw_buf);
         free(parsed);
 
-        close(client_fd);
+        transport_close(client_t);
         state.client_connected = false;
         state.count_tx = 0;
     }

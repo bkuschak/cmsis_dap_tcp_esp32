@@ -665,36 +665,18 @@ static void commands_complete_socket(const char *buf, void *cb_ctx,
 }
 
 // esp_linenoise_get_line() can't distinguish a dead connection from an
-// empty line -- both return an empty string. Check the socket directly.
-static bool peer_closed(int fd)
+// empty line -- both return an empty string. Check the transport directly.
+static bool peer_closed(transport_handle_t t)
 {
-    char buf;
-    ssize_t n = recv(fd, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
-    if (n == 0)
-        return true;                                // orderly close
-    if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
-        return true;                                 // real error
-    return false;
+    return transport_peer_closed(t);
 }
 
-// esp_linenoise_dumb() (vendored) only stops on a negative read_bytes_cb
-// return, not 0/EOF -- translate so a closed connection doesn't spin it
-// forever re-reading EOF.
-static ssize_t socket_read_bytes(int fd, void *buf, size_t count)
-{
-    ssize_t n = read(fd, buf, count);
-    if (n == 0) {
-        errno = ECONNRESET;
-        return -1;
-    }
-    return n;
-}
-
-// Runs one socket connection's REPL to completion. f/fd remain owned by
+// Runs one socket connection's REPL to completion. f/t remain owned by
 // the caller throughout.
-void process_socket_commands(FILE *f)
+void process_socket_commands(FILE *f, transport_handle_t t)
 {
-    int fd = fileno(f);
+    // Not fileno(f): f is fopencookie()-backed and has no real fd.
+    int fd = transport_fd(t);
     struct command_context *ctx =
         command_context_create(COMMAND_TRANSPORT_SOCKET, f);
     if (ctx == NULL) {
@@ -710,7 +692,8 @@ void process_socket_commands(FILE *f)
     ln_config.out_fd = fd;
     ln_config.completion_cb = commands_complete_socket;
     ln_config.allow_dumb_mode = true;  // plain clients (e.g. netcat) don't speak ANSI
-    ln_config.read_bytes_cb = socket_read_bytes;
+    ln_config.read_bytes_cb = transport_linenoise_read;
+    ln_config.write_bytes_cb = transport_linenoise_write;
 
     esp_linenoise_handle_t handle;
     if (esp_linenoise_create_instance(&ln_config, &handle) != ESP_OK) {
@@ -734,7 +717,7 @@ void process_socket_commands(FILE *f)
         // stale byte from the previous line in this reused buffer.
         memset(line, 0, sizeof(line));
         esp_linenoise_get_line(handle, line, sizeof(line));
-        if (peer_closed(fd))
+        if (peer_closed(t))
             break;
         if (first_line) {
             first_line = false;

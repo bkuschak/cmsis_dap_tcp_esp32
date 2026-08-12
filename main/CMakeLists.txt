@@ -6,7 +6,8 @@ set(COMPONENT_SRCS
     "SWO.c"
     "SW_DP.c"
     "UART.c"
-    "cmsis_dap_tcp.c")
+    "cmsis_dap_tcp.c"
+    "tls_transport.c")
 
 # Include the app entrypoint only for the standalone firmware project, so
 # other ESP-IDF projects can consume this directory as a component.
