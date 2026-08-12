@@ -28,6 +28,9 @@ cert = ${CERT_DIR}/clients/${CLIENT_NAME}.pem
 key = ${CERT_DIR}/clients/${CLIENT_NAME}.key
 CAfile = ${CERT_DIR}/cacert.pem
 verifyChain = yes
+# notice: connection accept/reset events, without the verifyChain boilerplate
+# or per-service TLS setup detail that "info" and above add.
+debug = notice
 
 [console]
 accept = 127.0.0.1:4440
