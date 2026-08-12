@@ -57,6 +57,20 @@ endif()
 set(TLS_EMBED "")
 if(CONFIG_ESP_TLS_ENABLED)
     set(TLS_EMBED "certs/servercert.pem" "certs/prvtkey.pem" "certs/cacert.pem")
+
+    # Auto-provisions certs on first build. Idempotent: reuses a CA dropped
+    # into host/certs/, or does nothing if main/certs/ already has certs
+    # (e.g. user-provided). See host/gen_esp32_certs.sh and
+    # main/certs/README.md for the supported workflows.
+    execute_process(
+        COMMAND "${COMPONENT_DIR}/../host/gen_esp32_certs.sh"
+        RESULT_VARIABLE GEN_CERTS_RESULT
+    )
+    if(NOT GEN_CERTS_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "gen_esp32_certs.sh failed (exit ${GEN_CERTS_RESULT}) -- see "
+            "main/certs/README.md, or place your own certs in main/certs/.")
+    endif()
 endif()
 
 if(CONFIG_ESP_DAP_1_LED_RGB OR
