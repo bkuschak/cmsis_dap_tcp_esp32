@@ -492,8 +492,25 @@ function cmsis_dap_tcp_proto.dissector(buffer, pinfo, tree)
             return
         end
 
-        local hdr_buf      = buffer(buf_offset, HEADER_SIZE)
-        local signature    = hdr_buf(0, 4):le_uint()
+        local hdr_buf   = buffer(buf_offset, HEADER_SIZE)
+        local signature = hdr_buf(0, 4):le_uint()
+
+        if signature ~= DAP_PKT_HDR_SIGNATURE then
+            if buf_offset == 0 then
+                -- Not a CMSIS-DAP-TCP payload at all -- e.g. a TLS
+                -- handshake or encrypted application data when
+                -- CONFIG_ESP_TLS_ENABLED=y. Decline instead of trusting a
+                -- bogus pkt_len from non-DAP bytes; Wireshark falls back to
+                -- raw/TCP display for this segment (or hands it to the TLS
+                -- dissector once decrypted, if key logging is configured).
+                return 0
+            end
+            -- Already dissected >=1 valid packet earlier in this segment;
+            -- treat the remainder as an anomaly and stop rather than using
+            -- a bogus pkt_len for further desegmentation.
+            break
+        end
+
         local pkt_len      = hdr_buf(4, 2):le_uint()
         local hdr_pkt_type = hdr_buf(6, 1):uint()
 
@@ -511,15 +528,10 @@ function cmsis_dap_tcp_proto.dissector(buffer, pinfo, tree)
 
         -- Header subtree
         local hdr_tree = pkt_tree:add(cmsis_dap_tcp_proto, hdr_buf, "Header")
+        -- Signature is already validated above (invalid ones bail/break
+        -- before reaching here), so this is always "[correct]".
         local sig_item = hdr_tree:add_le(f_hdr_signature, hdr_buf(0, 4))
-        if signature == DAP_PKT_HDR_SIGNATURE then
-            sig_item:append_text(" [correct]")
-        else
-            sig_item:append_text(" [incorrect]")
-            sig_item:add_expert_info(PI_MALFORMED, PI_ERROR,
-                string.format("Invalid signature 0x%08X (expected 0x%08X)",
-                    signature, DAP_PKT_HDR_SIGNATURE))
-        end
+        sig_item:append_text(" [correct]")
         hdr_tree:add_le(f_hdr_length,  hdr_buf(4, 2))
         hdr_tree:add(f_hdr_pkt_type,   hdr_buf(6, 1))
         hdr_tree:add(f_hdr_reserved,   hdr_buf(7, 1))
