@@ -2,11 +2,11 @@
 
 OpenOCD supports the CMSIS-DAP protocol to communicate with a JTAG / SWD
 programmer. Typically this is a local programmer with a USB connection. With
-the addition of the OpenOCD cmsis_dap_tcp backend, the CMSIS-DAP protocol can
+the addition of the OpenOCD `cmsis_dap_tcp` backend, the CMSIS-DAP protocol can
 now run over TCP/IP instead of USB. This allows OpenOCD to connect to a remote
 programmer over the network.
 
-This project provides the remote-side implementation of the cmsis_dap_tcp
+This project provides the remote-side implementation of the `cmsis_dap_tcp`
 protocol, using an ESP32 as the remote programmer. It allows a cheap ESP32
 board to program and debug an ARM microcontroller target. Both JTAG and the
 two-wire SWD interface are supported. OpenOCD connects to the ESP32 using
@@ -15,36 +15,40 @@ board.
 
 ![diagram](img/cmsis_dap_tcp_diagram.svg)
 
-- Tested with ESP32 S3, C3, and C6 boards as programmer and several STM32
-  development boards (F4xx, F103, G0xx) as targets. A Lattice ECP5 FPGA target
-  has also been used successfully.
-- Either JTAG mode or SWD mode can be used to program the target. 2 GPIO are
-  needed for SWD, or a minimum of 4 GPIO for JTAG.
-- An optional GPIO pin can be used to drive the NRST# (SRST) signal, but this
-  is typically not required.
-- In JTAG mode, an optional GPIO pin can be used to drive the TRST signal, but
-  this is typically not required.
-- A separate GPIO can drive an activity LED controlled by OpenOCD (standard or
-  RGB LED).
-- UART to TCP/IP bridge can be enabled to provide access to the target board's
-  serial console remotely, using an ESP32 UART.
-- Up to 3 independent JTAG/SWD interfaces can be supported simultaneously.
-- Up to 3 independent UART bridges can be supported simultaneously.
-- Optional mutual TLS (mTLS) to authenticate clients and encrypt all TCP
-  traffic.
+# Features
+
+- Up to 3 independent JTAG / SWD interfaces can be supported simultaneously.
+  For each interface:
+  - 2 GPIOs required for SWD or 4+ GPIOs for JTAG.
+  - Optional control of NRST# (SRST), but typically not required.
+  - Optional control of JTAG TRST, but typically not required.
+  - Optional activity LED controlled by OpenOCD (standard or RGB).
+- Up to 3 independent UART to TCP/IP bridges can be supported simultaneously
+  (if UARTs available).
+  - For remote access to the target board serial console, or other uses.
+- Console commands are accessible over TCP socket and/or USB-Serial.
+  - WiFi management, UART configuration, network and hardware interface status.
+- Optional ADC measurements streaming over TCP/IP.
+  - Currently only one channel. Sample rate and averaging are runtime
+    configurable.
+- Optional TLS sockets to authenticate clients and encrypt all TCP traffic.
+- Builds as a standalone ESP-IDF application, or can be integrated into your
+  own app as a component.
 - Typical performance:
-  - SWD reading / writing SRAM: up to 200 KB/sec
-  - SWD flashing a 512 KB firmware image to the STM32F401RE
-  completes in about 13.4 seconds, including erase, program, and verify (with 4
-  to 8 seconds of that time used for flash erasure). The Blue Pill takes about
-  6 seconds for a 64KB image.
+  - SWD reading / writing SRAM: up to 250 KB/sec.
+  - SWD flashing a 512 KB firmware image to the STM32F401RE completes in about
+    13.4 seconds, including erase, program, and verify (with 4 to 8 seconds of
+    that time used for flash erasure). The Blue Pill takes about 6 seconds for
+    a 64KB image.
   - Performance depends on the quality of your WiFi network.
+- Tested with ESP32 S3, C3, and C6 boards as the programmer.
+- Tested with STM32 boards (F4xx, F103, G0xx) and Lattice ECP5 FPGA as targets.
 
 # Supported boards
 
 The following boards were tested so far. They were chosen because they are
 inexpensive and readily available from Amazon, AliExpress, Seeed Studio,
-DigiKey, etc.
+DigiKey, etc. Performance level (from high to low) is: S3, C3, C6.
 
 - Expressif [ESP32-S3 Devkit C1](https://www.digikey.com/en/products/detail/espressif-systems/ESP32-S3-DEVKITC-1-N8R8/15295894) and clones
 - Unbranded HW-466AB [ESP32-C3 Super Mini](https://www.aliexpress.us/w/wholesale-esp32-c3-super-mini.html)
