@@ -497,7 +497,7 @@ void cmsis_dap_tcp_task(void *arg)
     msgbuf_init(&state->buf);
 
     // Only one active client at a time is allowed.
-    transport_handle_t client_t = NULL;
+    transport_handle_t client_transport = NULL;
     int run __attribute__((unused)) = 0;
     state->client_connected = false;
     state->client_ip_str[0] = '\0';
@@ -509,15 +509,18 @@ void cmsis_dap_tcp_task(void *arg)
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(listener_fd, &read_fds);
-        if (client_t != NULL) FD_SET(transport_fd(client_t), &read_fds);
-        int fdmax = MAX(client_t != NULL ? transport_fd(client_t) : -1, listener_fd);
+        if (client_transport != NULL)
+            FD_SET(transport_fd(client_transport), &read_fds);
+        int fdmax = MAX(client_transport != NULL ?
+                transport_fd(client_transport) : -1, listener_fd);
 
         // If TLS already has a full request buffered above the socket
         // layer, don't block in select() waiting for more raw bytes that
         // may never come (the client is waiting on our response) --
         // poll instead so the pending data gets processed below.
         struct timeval zero_tv = {0, 0};
-        bool pending = client_t != NULL && transport_has_pending(client_t);
+        bool pending = client_transport != NULL &&
+                transport_has_pending(client_transport);
         int sel = select(fdmax + 1, &read_fds, NULL, NULL,
                 pending ? &zero_tv : NULL);
         if (sel < 0) {
@@ -542,7 +545,7 @@ void cmsis_dap_tcp_task(void *arg)
                 }
             }
             else {
-                if (client_t != NULL) {
+                if (client_transport != NULL) {
                     fprintf(stderr, "cmsis_dap_tcp %d: dropping new "
                             "connection. Another client is already "
                             "connected.\n", task_state->config->instance);
@@ -571,16 +574,16 @@ void cmsis_dap_tcp_task(void *arg)
                 fprintf(stdout, "cmsis_dap_tcp %d: client connected %s:%d\n",
                         task_state->config->instance, state->client_ip_str,
                         state->client_port);
-                transport_handle_t new_t = transport_wrap(new_fd);
-                if (new_t == NULL) {
+                transport_handle_t new_transport = transport_wrap(new_fd);
+                if (new_transport == NULL) {
                     fprintf(stderr, "cmsis_dap_tcp %d: transport setup "
                             "failed, dropping client.\n",
                             task_state->config->instance);
                     continue;   // restart select() loop; new_fd already closed
                 }
                 transport_set_keepalives(new_fd, config->keepalive_timeout);
-                transport_set_nonblocking(new_t);
-                client_t = new_t;
+                transport_set_nonblocking(new_transport);
+                client_transport = new_transport;
                 msgbuf_init(&state->buf);
                 state->client_connected = true;
                 continue;   // restart select() loop
@@ -588,15 +591,16 @@ void cmsis_dap_tcp_task(void *arg)
         }
 
         // Data from client?
-        if (client_t != NULL && (FD_ISSET(transport_fd(client_t), &read_fds) ||
-                transport_has_pending(client_t))) {
-            int add_ret = msgbuf_add(&state->buf, client_t);
+        if (client_transport != NULL &&
+            (FD_ISSET(transport_fd(client_transport), &read_fds) ||
+             transport_has_pending(client_transport))) {
+            int add_ret = msgbuf_add(&state->buf, client_transport);
             if (add_ret < 0) {
                 if(add_ret != -ENOSPC) {
                     fprintf(stdout, "cmsis_dap_tcp %d: client disconnected.\n",
                             task_state->config->instance);
-                    transport_close(client_t);
-                    client_t = NULL;
+                    transport_close(client_transport);
+                    client_transport = NULL;
                     state->client_connected = false;
                     state->client_ip_str[0] = '\0';
                     continue;   // restart select() loop
@@ -614,7 +618,8 @@ void cmsis_dap_tcp_task(void *arg)
                 if(ret < 0)
                     break;
 
-                ret = process_dap_request(state, client_t, payload, payload_len);
+                ret = process_dap_request(state, client_transport, payload,
+                        payload_len);
                 msgbuf_consume(&state->buf, total_len);
 
                 // If we cannot process the request and response, just close
@@ -622,8 +627,8 @@ void cmsis_dap_tcp_task(void *arg)
                 if(ret < 0) {
                     fprintf(stdout, "cmsis_dap_tcp %d: disconnecting.\n",
                             task_state->config->instance);
-                    transport_close(client_t);
-                    client_t = NULL;
+                    transport_close(client_transport);
+                    client_transport = NULL;
                     state->client_connected = false;
                     state->client_ip_str[0] = '\0';
                     break;
@@ -635,7 +640,7 @@ void cmsis_dap_tcp_task(void *arg)
     fprintf(stdout, "cmsis_dap_tcp %d: shutting down.\n", task_state->config->instance);
     state->client_connected = false;
 
-    if (client_t != NULL) transport_close(client_t);
+    if (client_transport != NULL) transport_close(client_transport);
     close(listener_fd);
     release_resources(resources_slot);
     free(state);

@@ -453,7 +453,7 @@ static void uart_bridge_task(void* arg)
 
     // Select() loop blocks until activity on sockets or UART.
     struct sockaddr_in client_addr;
-    transport_handle_t client_t = NULL;
+    transport_handle_t client_transport = NULL;
     int uart_fd = -1;
     while (1) {
         fd_set read_fds;
@@ -461,18 +461,20 @@ static void uart_bridge_task(void* arg)
 
         // Add listening socket and client socket to read_fds.
         FD_SET(listen_fd, &read_fds);
-        if(client_t != NULL)
-            FD_SET(transport_fd(client_t), &read_fds);
+        if(client_transport != NULL)
+            FD_SET(transport_fd(client_transport), &read_fds);
         if(uart_fd >= 0)
             FD_SET(uart_fd, &read_fds);
         int max_fd = MAX(listen_fd,
-                MAX(client_t != NULL ? transport_fd(client_t) : -1, uart_fd));
+                MAX(client_transport != NULL ?
+                    transport_fd(client_transport) : -1, uart_fd));
 
         // Blocking call to select -- except if TLS already has a full
         // request buffered above the socket layer, in which case don't
         // block waiting for more raw bytes that may never come.
         struct timeval zero_tv = {0, 0};
-        bool pending = client_t != NULL && transport_has_pending(client_t);
+        bool pending = client_transport != NULL &&
+                transport_has_pending(client_transport);
         int activity = select(max_fd+1, &read_fds, NULL, NULL,
                 pending ? &zero_tv : NULL);
         if (activity < 0) {
@@ -495,10 +497,10 @@ static void uart_bridge_task(void* arg)
                 }
             }
             else {
-                if(client_t == NULL) {
+                if(client_transport == NULL) {
                     // New client.
-                    transport_handle_t new_t = transport_wrap(new_fd);
-                    if (new_t == NULL) {
+                    transport_handle_t new_transport = transport_wrap(new_fd);
+                    if (new_transport == NULL) {
                         fprintf(stderr, "UART bridge %d: transport setup "
                                 "failed, dropping client.\n",
                                 task_state->config->instance);
@@ -512,8 +514,8 @@ static void uart_bridge_task(void* arg)
                             state.client_ip_str, state.client_port);
 
                     transport_set_keepalives(new_fd, config.keepalive_timeout);
-                    transport_set_nonblocking(new_t);
-                    client_t = new_t;
+                    transport_set_nonblocking(new_transport);
+                    client_transport = new_transport;
 
                     // Reapply UART settings now, in case they were changed
                     // via the console since the last connection (or since
@@ -526,8 +528,8 @@ static void uart_bridge_task(void* arg)
                         fprintf(stderr, "UART bridge %d: failed opening "
                                 "UART%d: %s\n", task_state->config->instance,
                                 config.uart_num, strerror(errno));
-                        transport_close(client_t);
-                        client_t = NULL;
+                        transport_close(client_transport);
+                        client_transport = NULL;
                     }
 
                     int flags = fcntl(uart_fd, F_GETFL, 0);
@@ -550,18 +552,20 @@ static void uart_bridge_task(void* arg)
         }
 
         // Handle client socket.
-        if(client_t != NULL && (FD_ISSET(transport_fd(client_t), &read_fds) ||
-                transport_has_pending(client_t))) {
-            ret = transport_read(client_t, state.buffer, sizeof(state.buffer)-1);
+        if(client_transport != NULL &&
+           (FD_ISSET(transport_fd(client_transport), &read_fds) ||
+            transport_has_pending(client_transport))) {
+            ret = transport_read(client_transport, state.buffer,
+                    sizeof(state.buffer)-1);
             if(ret == 0 ||
               (ret < 0 && (errno == ECONNRESET || errno == ECONNABORTED ||
                            errno == ENOTCONN))) {
                 // Client has disconnected.
                 fprintf(stdout, "UART bridge %d: client disconnected.\n",
                         task_state->config->instance);
-                transport_close(client_t);
+                transport_close(client_transport);
                 close(uart_fd);
-                client_t = NULL;
+                client_transport = NULL;
                 uart_fd = -1;
                 state.count_rx = 0;
                 state.count_tx = 0;
@@ -590,7 +594,8 @@ static void uart_bridge_task(void* arg)
             }
             else {
                 state.count_rx += ret;
-                if (transport_write_all(client_t, state.buffer, ret) != 0)
+                if (transport_write_all(client_transport, state.buffer,
+                        ret) != 0)
                     fprintf(stderr, "UART bridge %d: socket write error: %s\n",
                             task_state->config->instance, strerror(errno));
             }
@@ -603,8 +608,8 @@ static void uart_bridge_task(void* arg)
     state.count_rx = 0;
     state.count_tx = 0;
 
-    if(client_t != NULL)
-        transport_close(client_t);
+    if(client_transport != NULL)
+        transport_close(client_transport);
     if(uart_fd >= 0)
         close(uart_fd);
     close(listen_fd);
