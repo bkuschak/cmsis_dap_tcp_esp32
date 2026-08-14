@@ -32,6 +32,7 @@ board.
   - Currently only one channel. Sample rate and averaging are runtime
     configurable.
 - Optional TLS sockets to authenticate clients and encrypt all TCP traffic.
+- Optional OTA firmware updates using a simple TCP socket with ncat.
 - Builds as a standalone ESP-IDF application, or can be integrated into your
   own app as a component.
 - Typical performance:
@@ -176,6 +177,15 @@ idf.py fullclean menuconfig build flash
 
    ```
    CMSIS-DAP config → Client authentication → Require certificates to connect (mutual TLS)
+   ```
+
+* Optional firmware updates can be done by pushing the firmware file over a raw
+  TCP socket using ```ncat```. See ```host/ota_push.sh```. It's recommended to
+  enable TLS authentication and/or use only a trusted LAN when enabling this
+  feature.
+
+   ```
+   CMSIS-DAP config → OTA firmware update → Enable TCP OTA firmware update
    ```
 
 * It is also possible to stream voltage measurements from one ADC channel over
