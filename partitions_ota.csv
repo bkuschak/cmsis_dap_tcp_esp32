@@ -1,0 +1,8 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# ota_0+ota_1 exactly fill 4MB flash (smallest supported board) -- no room
+# for another partition there without shrinking these.
+nvs,      data, nvs,     ,        0x6000,
+otadata,  data, ota,     ,        0x2000,
+phy_init, data, phy,     ,        0x1000,
+ota_0,    app,  ota_0,   ,        0x1F0000,
+ota_1,    app,  ota_1,   ,        0x1F0000,

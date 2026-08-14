@@ -46,6 +46,7 @@
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_mac.h"
+#include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -68,6 +69,10 @@
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
 #include "adc_stream.h"
 #include "soc/soc_caps.h"
+#endif
+
+#ifdef CONFIG_ESP_OTA_ENABLED
+#include "ota_tcp.h"
 #endif
 
 #if defined(CONFIG_ESP_DAP_1_LED_RGB) || \
@@ -497,6 +502,22 @@ static BaseType_t socket_console_task_start(void)
 }
 #endif
 
+#ifdef CONFIG_ESP_OTA_ENABLED
+static BaseType_t ota_tcp_task_start(void)
+{
+    static const struct ota_tcp_config config = {
+        .port               = CONFIG_ESP_OTA_TCP_PORT,
+#ifdef CONFIG_ESP_DAP_TCP_USE_KEEPALIVE
+        .keepalive_timeout  = CONFIG_ESP_DAP_TCP_KEEPALIVE_TIMEOUT,
+#else
+        .keepalive_timeout  = 0,
+#endif
+    };
+
+    return ota_tcp_start(&config, "ota_tcp_task", NULL);
+}
+#endif
+
 void app_main(void)
 {
     // DAP_Setup() runs in cmsis_dap_tcp_task(), which owns the task-local DAP
@@ -625,8 +646,20 @@ void app_main(void)
     }
 #endif
 
+#ifdef CONFIG_ESP_OTA_ENABLED
+    if(ota_tcp_task_start() != pdPASS) {
+        fprintf(stderr, "Failed to start OTA task.\n");
+    }
+#endif
+
 #ifdef CONFIG_ESP_PRINT_CPU_USAGE
     xTaskCreatePinnedToCore(cpu_usage_task, "cpu_usage", 4096, NULL,
             CPU_USAGE_TASK_PRIO, NULL, tskNO_AFFINITY);
 #endif
+
+    // Reaching here means boot completed and every service that could
+    // start did. Confirm this image is healthy so CONFIG_BOOTLOADER_
+    // APP_ROLLBACK_ENABLE doesn't revert to the previous OTA slot on next
+    // boot. Safe to call every boot, not just right after an update.
+    esp_ota_mark_app_valid_cancel_rollback();
 }

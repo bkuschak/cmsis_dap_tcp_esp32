@@ -962,6 +962,27 @@ menu "CMSIS-DAP configuration"
 
     endmenu
 
+    menu "OTA firmware update"
+
+        config ESP_OTA_ENABLED
+            bool "Enable TCP OTA firmware update"
+            default n
+            help
+                Accepts a firmware file over a raw TCP socket and flashes it
+                using ESP-IDF's OTA mechanism. See host/ota_push.sh. It is
+                highly recommended to enable CONFIG_ESP_TLS_ENABLED if using
+                this feature! Otherwise there is no authentication and anyone
+                can change the device firmware.
+
+        config ESP_OTA_TCP_PORT
+            int "TCP port number"
+            default 4460
+            depends on ESP_OTA_ENABLED
+            help
+                Select the TCP port number for the OTA server.
+
+    endmenu
+
     menu "WiFi configuration"
 
         config ESP_DAP_MANAGE_WIFI

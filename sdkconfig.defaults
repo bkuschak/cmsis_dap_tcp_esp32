@@ -13,8 +13,16 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 
 # mbedTLS tuning (only exercised once CONFIG_ESP_TLS_ENABLED=y). Buffer
 # sized to the max TLS record (16384): a smaller one caused real
-# mid-connection failures under bulk traffic. No cert bundle needed (no
-# outbound HTTPS/OTA), saves flash.
+# mid-connection failures under bulk traffic. No cert bundle needed (this
+# project never connects out to public HTTPS servers -- OTA is pushed in
+# over our own private-CA mTLS, not fetched), saves flash.
 CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
 CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=16384
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=n
+
+# OTA: custom two-slot partition table (see partitions_ota.csv) plus
+# automatic rollback if a newly-booted image never confirms itself healthy
+# (see main.c's esp_ota_mark_app_valid_cancel_rollback() call).
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota.csv"
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

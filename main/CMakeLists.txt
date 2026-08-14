@@ -15,12 +15,9 @@ if(CMAKE_PROJECT_NAME STREQUAL "cmsis_dap_tcp_esp32")
     list(APPEND COMPONENT_SRCS "main.c")
 endif()
 
-set(PRIV_REQUIRES "spi_flash" "esp_driver_gpio" "esp_adc" "esp_app_format")
+set(PRIV_REQUIRES "spi_flash" "esp_driver_gpio" "esp_adc" "esp_app_format" "app_update")
 
-# esp_wifi, mbedtls unconditional: REQUIRES resolves before sdkconfig is
-# available. mbedtls is already transitively linked in via esp_wifi
-# regardless of CONFIG_ESP_TLS_ENABLED, so this adds no real new cost --
-# it just makes tls_transport.c's mbedtls/*.h includes resolve correctly.
+# mbedtls required here. stripped out later if CONFIG_ESP_TLS_ENABLED=n
 set(REQUIRES
     "lwip" "esp_driver_uart" "esp_event" "esp_timer" "esp_wifi" "mbedtls"
     "nvs_flash" "console")
@@ -38,6 +35,10 @@ endif()
 if(CONFIG_ESP_ADC_STREAM_ENABLED)
     list(APPEND COMPONENT_SRCS "adc_stream.c")
     list(APPEND PRIV_REQUIRES "esp_adc")
+endif()
+
+if(CONFIG_ESP_OTA_ENABLED)
+    list(APPEND COMPONENT_SRCS "ota_tcp.c")
 endif()
 
 if(CONFIG_ESP_DAP_SERIAL_CONSOLE_ENABLED OR
@@ -58,10 +59,7 @@ set(TLS_EMBED "")
 if(CONFIG_ESP_TLS_ENABLED)
     set(TLS_EMBED "certs/servercert.pem" "certs/prvtkey.pem" "certs/cacert.pem")
 
-    # Auto-provisions certs on first build. Idempotent: reuses a CA dropped
-    # into host/certs/, or does nothing if main/certs/ already has certs
-    # (e.g. user-provided). See host/gen_esp32_certs.sh and
-    # main/certs/README.md for the supported workflows.
+    # Auto-provisions certs on first build. No-op if certs already exist.
     execute_process(
         COMMAND "${COMPONENT_DIR}/../host/gen_esp32_certs.sh"
         RESULT_VARIABLE GEN_CERTS_RESULT
@@ -80,9 +78,6 @@ if(CONFIG_ESP_DAP_1_LED_RGB OR
     list(APPEND PRIV_REQUIRES "esp_driver_rmt" "espressif__led_strip")
 endif()
 
-# REQUIRES (not PRIV_REQUIRES): uart_bridge.h exposes driver/uart.h's enum
-# types in its public config struct, so dependents need this propagated too.
-# The rest are kept alongside it for simplicity.
 idf_component_register(SRCS ${COMPONENT_SRCS}
                        PRIV_REQUIRES ${PRIV_REQUIRES}
                        REQUIRES ${REQUIRES}

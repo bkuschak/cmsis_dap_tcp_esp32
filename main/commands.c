@@ -20,6 +20,7 @@
 #include "sdkconfig.h"
 
 #include "esp_console.h"
+#include "esp_ota_ops.h"
 #include "argtable3/argtable3.h"
 #include "driver/uart.h"
 #include "linenoise/linenoise.h"
@@ -414,6 +415,74 @@ static int adc_cmd_handler(void *context, int argc, char **argv)
 }
 #endif
 
+static const char *ota_state_str(esp_ota_img_states_t state)
+{
+    switch (state) {
+        case ESP_OTA_IMG_NEW:            return "new";
+        case ESP_OTA_IMG_PENDING_VERIFY: return "pending verify";
+        case ESP_OTA_IMG_VALID:          return "valid";
+        case ESP_OTA_IMG_INVALID:        return "invalid";
+        case ESP_OTA_IMG_ABORTED:        return "aborted";
+        default:                         return "undefined";
+    }
+}
+
+// Prints one OTA slot's image info, or that it's empty.
+static void print_ota_slot(FILE *out, const esp_partition_t *part,
+        const esp_partition_t *running)
+{
+    if (part == NULL) {
+        fprintf(out, "(none)\n");
+        return;
+    }
+    fprintf(out, "%s: ", part->label);
+
+    esp_app_desc_t desc;
+    if (esp_ota_get_partition_description(part, &desc) != ESP_OK) {
+        fprintf(out, "empty (%" PRIu32 " KB slot)%s\n",
+                (uint32_t)(part->size / 1024), part == running ? ", running" : "");
+        return;
+    }
+    fprintf(out, "%s, built %s %s, %" PRIu32 " KB slot", desc.version,
+            desc.date, desc.time, (uint32_t)(part->size / 1024));
+
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(part, &state) == ESP_OK)
+        fprintf(out, ", %s", ota_state_str(state));
+    if (part == running)
+        fprintf(out, ", running");
+    fprintf(out, "\n");
+}
+
+static int firmware_cmd_handler(void *context, int argc, char **argv)
+{
+    struct command_context *ctx = context;
+    FILE *out = ctx->out;
+
+    if (argc == 2 && strcmp(argv[1], "rollback") == 0) {
+        const esp_partition_t *other = esp_ota_get_next_update_partition(NULL);
+        esp_app_desc_t desc;
+        esp_ota_img_states_t state;
+        // Refuse if the other slot has no valid image, or is itself already
+        // known-bad -- otherwise rollback could reboot into nothing bootable.
+        if (other == NULL ||
+                esp_ota_get_partition_description(other, &desc) != ESP_OK ||
+                esp_ota_get_state_partition(other, &state) != ESP_OK ||
+                state == ESP_OTA_IMG_INVALID || state == ESP_OTA_IMG_ABORTED) {
+            fprintf(out, "No valid previous image to roll back to.\n");
+            return 1;
+        }
+        fprintf(out, "Rolling back to '%s' (%s)...\n", other->label,
+                desc.version);
+        esp_ota_mark_app_invalid_rollback_and_reboot();
+        fprintf(out, "Rollback failed.\n");    // only reached on failure
+        return 1;
+    }
+
+    fprintf(out, "Usage: firmware rollback\n");
+    return 1;
+}
+
 static int reboot_cmd_handler(void *context, int argc, char **argv)
 {
     struct command_context *ctx = context;
@@ -509,6 +578,14 @@ static int status_cmd_handler(void *context, int argc, char **argv)
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
     adc_stream_print_status(out);
 #endif
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const esp_partition_t *ota_0 = esp_partition_find_first(
+            ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
+    const esp_partition_t *ota_1 = esp_partition_find_first(
+            ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
+    print_ota_slot(out, ota_0, running);
+    print_ota_slot(out, ota_1, running);
     return 0;
 }
 
@@ -517,23 +594,24 @@ static int help_cmd_handler(void *context, int argc, char **argv)
     struct command_context *ctx = context;
     FILE *out = ctx->out;
     fprintf(out, "Available commands:\n");
-    fprintf(out, "  help - Show this help message.\n");
-#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
-    fprintf(out, "  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure WiFi "
-           "credentials.\n");
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    fprintf(out, "  adc <gpio> <output_sps> <averaging> <format> - Configure "
+           "ADC streaming settings.\n");
 #endif
+    fprintf(out, "  firmware rollback - Revert to the previous firmware and reboot.\n");
+    fprintf(out, "  help - Show this help message.\n");
+    fprintf(out, "  reboot - Restart the device.\n");
+    fprintf(out, "  status - Report device status.\n");
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
     fprintf(out, "  uart <instance> <baud_rate> <data_bits> <parity> <stop_bits> - "
            "Configure UART bridge settings.\n");
 #endif
-#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
-    fprintf(out, "  adc <gpio> <output_sps> <averaging> <format> - Configure "
-           "ADC streaming settings.\n");
+#ifdef CONFIG_ESP_DAP_MANAGE_WIFI
+    fprintf(out, "  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure WiFi "
+           "credentials.\n");
 #endif
-    fprintf(out, "  reboot - Restart the device.\n");
-    fprintf(out, "  status - Report network status.\n");
     return 0;
 }
 
@@ -599,6 +677,7 @@ static const struct {
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
     { "adc",    adc_cmd_handler },
 #endif
+    { "firmware", firmware_cmd_handler },
     { "help",   help_cmd_handler },
     { "reboot", reboot_cmd_handler },
     { "status", status_cmd_handler },
@@ -807,6 +886,14 @@ void commands_init_serial(void)
         .context = ctx,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&status_cmd));
+
+    const esp_console_cmd_t firmware_cmd = {
+        .command = "firmware",
+        .help = "firmware rollback",
+        .func_w_context = firmware_cmd_handler,
+        .context = ctx,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&firmware_cmd));
 
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     const esp_console_cmd_t wifi_cmd = {

@@ -12,6 +12,9 @@
 # present, if you've issued more than one via gen_client_cert.sh) as
 # environment variables.
 #
+# Usage:
+#   HOST=192.168.1.5 CLIENT_NAME="User1"  host/run_stunnel.sh
+#
 # Requires 'stunnel' (e.g. 'brew install stunnel').
 #
 
@@ -64,6 +67,10 @@ connect = ${HOST}:4446
 accept = 127.0.0.1:4451
 connect = ${HOST}:4451
 EOF
+
+# No [ota] section: stunnel closes the whole connection as soon as the local
+# side half-closes, discarding the device's OK/FAIL reply. ota_push.sh talks
+# TLS directly (ncat --ssl) instead.
 
 echo "Proxying local ports to ${HOST} via mutual TLS (Ctrl-C to stop)."
 echo "Services not actually enabled on the ESP32 will just fail to connect -- harmless."
