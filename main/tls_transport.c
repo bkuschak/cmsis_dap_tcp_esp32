@@ -21,6 +21,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "tls_transport.h"
@@ -236,9 +237,16 @@ transport_handle_t transport_wrap(int fd)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
+    // SO_RCVTIMEO/SO_SNDTIMEO only bound each individual recv()/send(), not
+    // this whole retry loop -- a peer that keeps the handshake alive one
+    // slow byte at a time could otherwise wedge it forever. Bound the total
+    // elapsed time too.
+    int64_t deadline_us = esp_timer_get_time() +
+            (int64_t)CONFIG_ESP_TLS_HANDSHAKE_TIMEOUT_MS * 1000;
     do {
         ret = mbedtls_ssl_handshake(&t->ssl);
-    } while (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE);
+    } while ((ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+            && esp_timer_get_time() < deadline_us);
 
     struct timeval no_tv = {0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &no_tv, sizeof(no_tv));
