@@ -42,6 +42,7 @@
 
 struct transport_s {
     int fd;
+    bool suppress_io;       // see transport_suppress_io()
 #if CONFIG_ESP_TLS_ENABLED
     mbedtls_net_context net;   // wraps fd for mbedtls_net_send/recv's bio ctx
     mbedtls_ssl_context ssl;
@@ -414,6 +415,10 @@ ssize_t transport_linenoise_read(int fd, void *buf, size_t count)
     transport_handle_t t = registry_find(fd);
     if (t == NULL)
         return read(fd, buf, count);   // shouldn't happen; fall back to plain read
+    if (t->suppress_io) {
+        errno = EAGAIN;
+        return -1;
+    }
     ssize_t n = transport_read(t, buf, count);
     // esp_linenoise_dumb() only stops on a negative return, not 0/EOF --
     // translate so a closed connection doesn't spin it forever.
@@ -429,7 +434,14 @@ ssize_t transport_linenoise_write(int fd, const void *buf, size_t count)
     transport_handle_t t = registry_find(fd);
     if (t == NULL)
         return write(fd, buf, count);  // shouldn't happen; fall back to plain write
+    if (t->suppress_io)
+        return (ssize_t)count;         // pretend success; nothing actually sent
     return transport_write(t, buf, count);
+}
+
+void transport_suppress_io(transport_handle_t t, bool suppress)
+{
+    t->suppress_io = suppress;
 }
 
 static ssize_t cookie_read(void *cookie, char *buf, size_t n)

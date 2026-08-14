@@ -770,25 +770,23 @@ void process_socket_commands(FILE *f, transport_handle_t t)
     ln_config.in_fd = fd;
     ln_config.out_fd = fd;
     ln_config.completion_cb = commands_complete_socket;
-    ln_config.allow_dumb_mode = true;  // plain clients (e.g. netcat) don't speak ANSI
     ln_config.read_bytes_cb = transport_linenoise_read;
     ln_config.write_bytes_cb = transport_linenoise_write;
 
+    // Workaround to suppress I/O while esp_linenoise_create_instance() runs to
+    // discard the terminal probe escape codes, which look like garbage to
+    // netcat. Unfortunately there's no "force_dumb_mode" option in ln_config.
+    transport_suppress_io(t, true);
+
     esp_linenoise_handle_t handle;
-    if (esp_linenoise_create_instance(&ln_config, &handle) != ESP_OK) {
+    esp_err_t create_err = esp_linenoise_create_instance(&ln_config, &handle);
+    transport_suppress_io(t, false);
+    if (create_err != ESP_OK) {
         fprintf(stderr, "Command socket: failed to create linenoise instance (fd %d).\n",
                 fd);
         command_context_destroy(ctx);
         return;
     }
-
-    // Terminals that reply to the dumb-mode probe (ESC[5n) don't send that
-    // reply on its own -- telnet/nc queue it and flush it together with the
-    // first line the user types. Strip the resulting "[0n"/"[3n" prefix
-    // (ESC already consumed as a control char) from just the first line.
-    bool dumb_mode = false;
-    esp_linenoise_is_dumb_mode(handle, &dumb_mode);
-    bool first_line = dumb_mode;
 
     char line[MAX_CMD_LINE_LENGTH];
     while (1) {
@@ -798,11 +796,6 @@ void process_socket_commands(FILE *f, transport_handle_t t)
         esp_linenoise_get_line(handle, line, sizeof(line));
         if (peer_closed(t))
             break;
-        if (first_line) {
-            first_line = false;
-            if (line[0] == '[' && isdigit((unsigned char)line[1]) && line[2] == 'n')
-                memmove(line, line + 3, strlen(line + 3) + 1);
-        }
         if (line[0] != '\0') {
             esp_linenoise_history_add(handle, line);
             commands_run_socket(ctx, line);

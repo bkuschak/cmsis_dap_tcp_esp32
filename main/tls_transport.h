@@ -59,6 +59,10 @@ void transport_close(transport_handle_t t);
 ssize_t transport_linenoise_read(int fd, void *buf, size_t count);
 ssize_t transport_linenoise_write(int fd, const void *buf, size_t count);
 
+// Temporarily suppresss reads and writes to the underlying fds. Workaround to
+// disable esp_linenoise terminal probing.
+void transport_suppress_io(transport_handle_t t, bool suppress);
+
 // fopencookie()-backed FILE*, drop-in replacement for fdopen(fd, "r+").
 FILE *transport_fopen(transport_handle_t t);
 
