@@ -968,13 +968,58 @@ menu "CMSIS-DAP configuration"
             bool "Enable WiFi configuration and connection management"
             default y
             help
-                Initializes WiFi, connects to the configured AP, and
-                manages reconnection. Disable if a host project (when
+                Initializes WiFi in Station or SoftAP mode. Station mode
+                connects to a configured AP and manages reconnection.
+                Disable if a host project (when
                 this is consumed as a component) manages WiFi/networking
                 itself, or the target board has no WiFi radio.
 
         if ESP_DAP_MANAGE_WIFI
 
+        choice ESP_DAP_WIFI_MODE
+            prompt "WiFi operating mode"
+            default ESP_DAP_WIFI_MODE_STA
+            help
+                Station mode connects to an existing wireless network.
+                SoftAP mode creates a local network for direct connections
+                from a computer without requiring an external router.
+
+            config ESP_DAP_WIFI_MODE_STA
+                bool "Station - connect to an existing WiFi network"
+
+            config ESP_DAP_WIFI_MODE_AP
+                bool "SoftAP - create a WiFi network"
+        endchoice
+
+        config ESP_DAP_SOFTAP_SSID
+            string "SoftAP network name (SSID)"
+            depends on ESP_DAP_WIFI_MODE_AP
+            default "ESP32 STLINK"
+            help
+                SSID advertised by the ESP32 in SoftAP mode (1-32 bytes).
+
+        config ESP_DAP_SOFTAP_PASSWORD
+            string "SoftAP WPA2 password"
+            depends on ESP_DAP_WIFI_MODE_AP
+            default ""
+            help
+                Set a unique 8-63 byte password before flashing.
+                Empty passwords are intentionally rejected at startup.
+
+        config ESP_DAP_SOFTAP_CHANNEL
+            int "SoftAP WiFi channel"
+            depends on ESP_DAP_WIFI_MODE_AP
+            range 1 11
+            default 1
+
+        config ESP_DAP_SOFTAP_MAX_CONNECTIONS
+            int "Maximum simultaneous SoftAP clients"
+            depends on ESP_DAP_WIFI_MODE_AP
+            range 1 4
+            default 4
+
+        # Preserve existing Station settings and saved NVS credentials.
+        # These settings are not used when SoftAP is selected.
         config ESP_WIFI_SSID
             string "WiFi SSID"
             default "myssid"

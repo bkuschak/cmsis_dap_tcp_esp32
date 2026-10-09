@@ -207,6 +207,12 @@ esp32>
 
 ## Connecting to WiFi
 
+### Station mode (default)
+
+Station mode remains the default and continues to use the existing
+menuconfig WiFi credentials or Station credentials stored by the `wifi`
+console command.
+
 After booting, the ESP32 will attempt to connect to WiFi. By default it will
 use the hardcoded credentials provided in menuconfig. Optionally, you can
 change these credentials at runtime using the command interface on the USB
@@ -425,6 +431,46 @@ Info : [stm32f4x.cpu] starting gdb server on 3333
 Info : Listening on port 3333 for gdb connections
 Info : accepting 'telnet' connection on tcp/4444
 ```
+
+### SoftAP mode (direct connection without a router)
+
+Choose **CMSIS-DAP configuration → WiFi configuration → WiFi operating
+mode → SoftAP** in `idf.py menuconfig`. Configure a unique WPA2 password
+(8-63 bytes); a blank password is rejected at startup. Optional settings
+include the SoftAP SSID (default `ESP32 STLINK`), channel, and maximum
+number of connected WiFi clients.
+
+Build and flash as usual. The ESP32 creates a WiFi network using ESP-IDF's
+default SoftAP interface, DHCP server, and IPv4 address
+**`192.168.4.1`**. Connect the host computer to the ESP32 network. This
+network does **not** provide Internet access. To confirm connectivity:
+
+```sh
+ping 192.168.4.1
+```
+
+Configure the OpenOCD CMSIS-DAP TCP backend to use the ESP32's address:
+
+```tcl
+adapter driver cmsis-dap
+cmsis-dap backend tcp
+cmsis-dap tcp host 192.168.4.1
+cmsis-dap tcp port 4441
+transport select swd
+```
+
+The existing CMSIS-DAP TCP, socket console, and UART TCP bridge ports remain
+unchanged; for example, the default UART bridge #1 uses TCP port `4442`.
+Use the `status` console command to display the SoftAP IP address and
+listening services. The `wifi` command only changes **Station** credentials;
+SoftAP credentials are configured through `menuconfig`. Previously saved
+Station credentials are preserved when switching to SoftAP mode.
+
+To return to Station operation, reselect **Station** in menuconfig, rebuild,
+and flash. Only use this SoftAP feature on networks/devices you trust:
+WiFi authentication protects association to the network, but CMSIS-DAP
+TCP itself does not provide user authentication.
+
 
 ## Using ESP32-S3 @ 240 MHz
 

@@ -3,8 +3,9 @@
  * SPDX-FileCopyrightText: 2010-2022 Espressif Systems (Shanghai) CO LTD
  * SPDX-License-Identifier: Apache-2.0
  *
- * WiFi station: connect to the configured AP, persist/restore credentials
- * set via the 'wifi' console command, and report status.
+ * WiFi: Station mode connects to an existing AP, while optional SoftAP
+ * mode creates a local network for direct CMSIS-DAP TCP connections.
+ * Station credentials can be updated using the 'wifi' console command.
  *
  * Some parts of this code were adapted from:
  *     esp-idf/examples/wifi/getting_started/station
@@ -17,6 +18,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "esp_event.h"
+#include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
 #include "esp_netif_types.h"
 #include "esp_netif_net_stack.h"
@@ -31,6 +33,8 @@
 #include "wifi.h"
 #include "reboot.h"
 
+/* The Station-only WiFi configuration is not needed in SoftAP builds. */
+#ifndef CONFIG_ESP_DAP_WIFI_MODE_AP
 #if CONFIG_ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HUNT_AND_PECK
 #define ESP_WIFI_SAE_MODE WPA3_SAE_PWE_HUNT_AND_PECK
 #define EXAMPLE_H2E_IDENTIFIER ""
@@ -76,6 +80,8 @@
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
+#endif // !CONFIG_ESP_DAP_WIFI_MODE_AP
+
 #define NVS_NAMESPACE           "wifi_config"
 #define NVS_KEY_SSID            "ssid"
 #define NVS_KEY_PASSWORD        "password"
@@ -83,6 +89,7 @@
 #define MAX_SSID_LEN            32
 #define MAX_PASSWORD_LEN        64
 
+#ifndef CONFIG_ESP_DAP_WIFI_MODE_AP
 static int wifi_retry_num;
 static EventGroupHandle_t wifi_event_group;
 static esp_netif_t *sta_netif;
@@ -100,6 +107,7 @@ static wifi_auth_mode_t wifi_auth_mode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD;
 static char stored_ssid[MAX_SSID_LEN] = {0};
 static char stored_password[MAX_PASSWORD_LEN] = {0};
 static wifi_auth_mode_t stored_auth_mode = WIFI_AUTH_WPA2_PSK;
+#endif // !CONFIG_ESP_DAP_WIFI_MODE_AP
 
 esp_err_t wifi_save_config(const char *ssid, const char *password,
         wifi_auth_mode_t auth_mode)
@@ -125,6 +133,7 @@ esp_err_t wifi_save_config(const char *ssid, const char *password,
     return err;
 }
 
+#ifndef CONFIG_ESP_DAP_WIFI_MODE_AP
 static esp_err_t load_wifi_credentials(void)
 {
     nvs_handle_t nvs_handle;
@@ -152,6 +161,7 @@ static esp_err_t load_wifi_credentials(void)
     nvs_close(nvs_handle);
     return err;
 }
+#endif // !CONFIG_ESP_DAP_WIFI_MODE_AP
 
 esp_err_t wifi_clear_config(void)
 {
@@ -173,18 +183,28 @@ esp_err_t wifi_clear_config(void)
 
 void wifi_mark_service_started(void)
 {
+#ifndef CONFIG_ESP_DAP_WIFI_MODE_AP
     service_started = true;
+#endif
 }
 
 void wifi_get_status(bool *connected, const char **ssid, int *rssi)
 {
+#ifdef CONFIG_ESP_DAP_WIFI_MODE_AP
+    /* This API reports Station connectivity; SoftAP has no STA RSSI. */
+    *connected = false;
+    *ssid = CONFIG_ESP_DAP_SOFTAP_SSID;
+    *rssi = 0;
+#else
     *connected = wifi_connected;
     *ssid = wifi_ssid;
     if (wifi_connected) {
         esp_wifi_sta_get_rssi(rssi);
     }
+#endif
 }
 
+#ifndef CONFIG_ESP_DAP_WIFI_MODE_AP
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -241,8 +261,68 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 #endif
 }
 
+#endif // !CONFIG_ESP_DAP_WIFI_MODE_AP
+
+/* The SoftAP interface uses the ESP-IDF default IPv4 address and DHCP
+ * server (typically 192.168.4.1/24).  Existing Station credentials are
+ * intentionally ignored in this mode, but remain stored for Station mode.
+ */
+#if defined(CONFIG_ESP_DAP_WIFI_MODE_AP)
+static int wifi_init_softap(void)
+{
+    const char *ssid = CONFIG_ESP_DAP_SOFTAP_SSID;
+    const char *password = CONFIG_ESP_DAP_SOFTAP_PASSWORD;
+    size_t ssid_len = strlen(ssid);
+    size_t password_len = strlen(password);
+
+    /* ESP-IDF permits an SSID up to 32 bytes (not necessarily NUL-terminated). */
+    if (ssid_len == 0 || ssid_len > sizeof(((wifi_config_t *)0)->ap.ssid) ||
+        password_len < 8 || password_len > 63) {
+        fprintf(stderr, "SoftAP: invalid SSID (1-32 bytes) or WPA2 password (8-63 bytes).\n");
+        return -1;
+    }
+
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
+    if (ap_netif == NULL) {
+        fprintf(stderr, "SoftAP: failed to create network interface.\n");
+        return -1;
+    }
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    /* Do not overwrite WiFi settings saved for Station mode. */
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+
+    wifi_config_t ap_config = {
+        .ap = {
+            .ssid_len = (uint8_t)ssid_len,
+            .channel = CONFIG_ESP_DAP_SOFTAP_CHANNEL,
+            .max_connection = CONFIG_ESP_DAP_SOFTAP_MAX_CONNECTIONS,
+            .authmode = WIFI_AUTH_WPA2_PSK,
+        },
+    };
+    memcpy(ap_config.ap.ssid, ssid, ssid_len);
+    memcpy(ap_config.ap.password, password, password_len);
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    esp_netif_ip_info_t ip_info;
+    ESP_ERROR_CHECK(esp_netif_get_ip_info(ap_netif, &ip_info));
+    printf("SoftAP started: SSID='%s', IP=" IPSTR "\n",
+           ssid, IP2STR(&ip_info.ip));
+    return 0;
+}
+#endif
+
 int wifi_init(void)
 {
+#if defined(CONFIG_ESP_DAP_WIFI_MODE_AP)
+    return wifi_init_softap();
+#else
     wifi_event_group = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());
@@ -335,4 +415,5 @@ int wifi_init(void)
         return 0;   // Success.
     }
     return -1;      // Failure.
+#endif
 }

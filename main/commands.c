@@ -101,6 +101,7 @@ struct command_context {
 #define MAX_SSID_LEN            32
 #define MAX_PASSWORD_LEN        64
 
+#ifndef CONFIG_ESP_DAP_WIFI_MODE_AP
 static wifi_auth_mode_t parse_auth_mode(const char* auth_str)
 {
     // Parse auth mode string to wifi_auth_mode_t.
@@ -123,10 +124,18 @@ static wifi_auth_mode_t parse_auth_mode(const char* auth_str)
     }
 }
 
+#endif // !CONFIG_ESP_DAP_WIFI_MODE_AP
+
 static int wifi_cmd_handler(void *context, int argc, char **argv)
 {
     struct command_context *ctx = context;
     FILE *out = ctx->out;
+#ifdef CONFIG_ESP_DAP_WIFI_MODE_AP
+    (void)argc;
+    (void)argv;
+    fprintf(out, "WiFi SoftAP is configured in menuconfig; the wifi command is available only in Station mode.\n");
+    return 1;
+#else
     int nerrors = arg_parse(argc, argv, (void **) &ctx->wifi_args);
     if (nerrors != 0) {
         arg_print_errors(out, ctx->wifi_args.end, argv[0]);
@@ -170,7 +179,7 @@ static int wifi_cmd_handler(void *context, int argc, char **argv)
 
     fprintf(out, "WiFi credentials received:\n");
     fprintf(out, "  SSID: %s\n", ssid);
-    fprintf(out, "  Password: %s\n", password);
+    fprintf(out, "  Password: [redacted]\n");
     fprintf(out, "  Auth mode: %s\n", auth_mode_str);
 
     esp_err_t err = wifi_save_config(ssid, password, auth_mode);
@@ -182,6 +191,7 @@ static int wifi_cmd_handler(void *context, int argc, char **argv)
         return 1;
     }
     return 0;
+#endif
 }
 #endif // CONFIG_ESP_DAP_MANAGE_WIFI
 
@@ -422,7 +432,8 @@ static int reboot_cmd_handler(void *context, int argc, char **argv)
     return 0;
 }
 
-#if defined(CONFIG_ESP_DAP_MANAGE_WIFI) && defined(CONFIG_LWIP_IPV6)
+#if defined(CONFIG_ESP_DAP_MANAGE_WIFI) && defined(CONFIG_LWIP_IPV6) && \
+    !defined(CONFIG_ESP_DAP_WIFI_MODE_AP)
 static const char* ipv6_type_str(esp_ip6_addr_type_t type)
 {
     switch (type) {
@@ -443,6 +454,18 @@ static int status_cmd_handler(void *context, int argc, char **argv)
     FILE *out = ctx->out;
 
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
+#ifdef CONFIG_ESP_DAP_WIFI_MODE_AP
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (netif == NULL) {
+        fprintf(out, "SoftAP interface not found.\n");
+    } else {
+        esp_netif_ip_info_t ip_info;
+        fprintf(out, "WiFi mode: SoftAP, SSID: '%s'\n", CONFIG_ESP_DAP_SOFTAP_SSID);
+        if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+            fprintf(out, "IP address: " IPSTR "\n", IP2STR(&ip_info.ip));
+        }
+    }
+#else
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
 
     if (netif == NULL) {
@@ -491,6 +514,7 @@ static int status_cmd_handler(void *context, int argc, char **argv)
         }
 #endif
     }
+#endif // CONFIG_ESP_DAP_WIFI_MODE_AP
 #endif // CONFIG_ESP_DAP_MANAGE_WIFI
 
 #ifdef CONFIG_ESP_DAP_SOCKET_CONSOLE_ENABLED
@@ -519,8 +543,12 @@ static int help_cmd_handler(void *context, int argc, char **argv)
     fprintf(out, "Available commands:\n");
     fprintf(out, "  help - Show this help message.\n");
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
+#ifdef CONFIG_ESP_DAP_WIFI_MODE_AP
+    fprintf(out, "  wifi - Unavailable in SoftAP mode (configure via menuconfig).\n");
+#else
     fprintf(out, "  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure WiFi "
            "credentials.\n");
+#endif
 #endif
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
