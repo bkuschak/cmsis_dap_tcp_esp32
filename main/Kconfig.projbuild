@@ -983,6 +983,8 @@ menu "CMSIS-DAP configuration"
                 Station mode connects to an existing wireless network.
                 SoftAP mode creates a local network for direct connections
                 from a computer without requiring an external router.
+                The default can be overridden at runtime via the serial
+                wifi_mode command; only one mode is active at a time.
 
             config ESP_DAP_WIFI_MODE_STA
                 bool "Station - connect to an existing WiFi network"
@@ -993,14 +995,12 @@ menu "CMSIS-DAP configuration"
 
         config ESP_DAP_SOFTAP_SSID
             string "SoftAP network name (SSID)"
-            depends on ESP_DAP_WIFI_MODE_AP
             default "ESP32 STLINK"
             help
                 SSID advertised by the ESP32 in SoftAP mode (1-32 bytes).
 
         config ESP_DAP_SOFTAP_PASSWORD
             string "SoftAP WPA2 password"
-            depends on ESP_DAP_WIFI_MODE_AP
             default ""
             help
                 Set a unique 8-63 byte password before flashing.
@@ -1008,18 +1008,16 @@ menu "CMSIS-DAP configuration"
 
         config ESP_DAP_SOFTAP_CHANNEL
             int "SoftAP WiFi channel"
-            depends on ESP_DAP_WIFI_MODE_AP
             range 1 11
             default 1
 
         config ESP_DAP_SOFTAP_MAX_CONNECTIONS
             int "Maximum simultaneous SoftAP clients"
-            depends on ESP_DAP_WIFI_MODE_AP
             range 1 4
             default 4
 
-        # Preserve existing Station settings and saved NVS credentials.
-        # These settings are not used when SoftAP is selected.
+        # Keep both sets of defaults compiled in so either mode can be
+        # selected via the serial console without reflashing.
         config ESP_WIFI_SSID
             string "WiFi SSID"
             default "myssid"

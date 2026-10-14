@@ -124,9 +124,10 @@ idf.py fullclean menuconfig build flash
   <img src="img/menuconfig1.png" width="75%" />
 
 * Hardcoded WiFi credentials can be configured on the "WiFi configuration"
-  subpage.  (If you are not using WPA2, you might need to adjust the WiFi Scan
-  auth mode threshold). WiFi credentials can also be changed at runtime using
-  the ```wifi``` console command, and these will be stored in flash memory.
+  subpage. (If you are not using WPA2, you might need to adjust the WiFi Scan
+  auth mode threshold). Both Station and SoftAP defaults can be configured
+  here regardless of the selected default operating mode. The `wifi`, `ap`,
+  and `wifi_mode` console commands store runtime overrides in NVS.
 
   <img src="img/menuconfig2.png" width="75%" />
 
@@ -198,7 +199,9 @@ Show the available console commands.
 esp32> help
 Available commands:
   help - Show this help message.
-  wifi "<ssid>" "<password>" [auth_mode] - Configure WiFi credentials.
+  wifi "<ssid>" "<password>" [auth_mode] - Configure Station credentials.
+  ap "<ssid>" "<password>" [channel] - Configure SoftAP settings.
+  wifi_mode <sta|ap|default> - Select active WiFi mode (serial console only).
   uart <instance> <baud_rate> <data_bits> <parity> <stop_bits> - Configure UART bridge settings.
   reboot - Restart the device.
   status - Report network status.
@@ -209,9 +212,12 @@ esp32>
 
 ### Station mode (default)
 
-Station mode remains the default and continues to use the existing
-menuconfig WiFi credentials or Station credentials stored by the `wifi`
-console command.
+Station remains the menuconfig default. At boot, the saved `wifi_mode`
+override (if any) selects Station or SoftAP. The modes are mutually
+exclusive: simultaneous STA+SoftAP is not supported. Both sets of credentials
+remain saved when switching modes. Station mode continues to use the existing
+menuconfig credentials or Station credentials stored by the `wifi` console
+command.
 
 After booting, the ESP32 will attempt to connect to WiFi. By default it will
 use the hardcoded credentials provided in menuconfig. Optionally, you can
@@ -434,13 +440,56 @@ Info : accepting 'telnet' connection on tcp/4444
 
 ### SoftAP mode (direct connection without a router)
 
-Choose **CMSIS-DAP configuration → WiFi configuration → WiFi operating
-mode → SoftAP** in `idf.py menuconfig`. Configure a unique WPA2 password
-(8-63 bytes); a blank password is rejected at startup. Optional settings
-include the SoftAP SSID (default `ESP32 STLINK`), channel, and maximum
-number of connected WiFi clients.
+The default operating mode can be selected in **CMSIS-DAP configuration →
+WiFi configuration → WiFi operating mode** in `idf.py menuconfig`. Both
+Station and SoftAP defaults are compiled into the firmware, so the active
+mode can also be changed later over the serial console without rebuilding.
 
-Build and flash as usual. The ESP32 creates a WiFi network using ESP-IDF's
+Before selecting SoftAP, configure a unique WPA2 password (8-63 bytes)
+either through menuconfig or with the `ap` console command. A blank password
+is rejected at startup. The menuconfig SoftAP SSID defaults to `ESP32 STLINK`,
+and the channel defaults to 1. You may also set the maximum number of clients.
+
+For example, while the device is running in Station mode, use the serial
+console to configure SoftAP, select it, and reboot:
+
+```
+esp32> ap "ESP32 Debugger" "StrongPassword123" 6
+esp32> wifi_mode ap
+esp32> reboot
+```
+
+To switch back to Station without losing either mode's credentials:
+
+```
+esp32> wifi_mode sta
+esp32> reboot
+```
+
+To restore the menuconfig *mode* selection (without erasing credentials):
+
+```
+esp32> wifi_mode default
+esp32> reboot
+```
+
+The existing `wifi "<ssid>" "<password>" [auth_mode]` command remains
+available in either mode. Likewise, `ap "<ssid>" "<password>" [channel]`
+changes SoftAP settings while either mode is active. If `channel` is omitted,
+the menuconfig default channel is used, just as `wifi` uses its default
+authentication mode when omitted. Use `ap "" ""` to clear stored SoftAP
+overrides; this does **not** change the saved mode selection or erase Station
+credentials. Ensure menuconfig has a valid SoftAP password before clearing
+SoftAP overrides if SoftAP is the selected mode.
+
+Mode switching via `wifi_mode` is deliberately available **only on the serial
+console**, to avoid disrupting active CMSIS-DAP or TCP console connections.
+Configuration changes take effect after a reboot. The current mode and
+SoftAP SSID/channel are shown by `status`. Passwords are not printed by the
+commands, but credentials entered over a TCP console are not encrypted; use
+the serial console for sensitive configuration.
+
+The ESP32 creates a WiFi network using ESP-IDF's
 default SoftAP interface, DHCP server, and IPv4 address
 **`192.168.4.1`**. Connect the host computer to the ESP32 network. This
 network does **not** provide Internet access. To confirm connectivity:
@@ -461,13 +510,11 @@ transport select swd
 
 The existing CMSIS-DAP TCP, socket console, and UART TCP bridge ports remain
 unchanged; for example, the default UART bridge #1 uses TCP port `4442`.
-Use the `status` console command to display the SoftAP IP address and
-listening services. The `wifi` command only changes **Station** credentials;
-SoftAP credentials are configured through `menuconfig`. Previously saved
-Station credentials are preserved when switching to SoftAP mode.
+Use the `status` console command to display the current WiFi mode, SoftAP
+IP address, and listening services. Previously saved Station credentials are
+preserved when switching to SoftAP mode.
 
-To return to Station operation, reselect **Station** in menuconfig, rebuild,
-and flash. Only use this SoftAP feature on networks/devices you trust:
+Only use this SoftAP feature on networks/devices you trust:
 WiFi authentication protects association to the network, but CMSIS-DAP
 TCP itself does not provide user authentication.
 
