@@ -135,19 +135,25 @@ wifi_operating_mode_t wifi_get_operating_mode(void)
     return operating_mode;
 }
 
-static void load_operating_mode(void)
+wifi_operating_mode_t wifi_get_selected_operating_mode(void)
 {
+    wifi_operating_mode_t mode = wifi_get_default_operating_mode();
     nvs_handle_t handle;
-    operating_mode = wifi_get_default_operating_mode();
     if (nvs_open(MODE_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK)
-        return;
+        return mode;
 
     uint8_t saved_mode;
     if (nvs_get_u8(handle, MODE_NVS_KEY, &saved_mode) == ESP_OK &&
         saved_mode <= WIFI_OPERATING_MODE_AP) {
-        operating_mode = (wifi_operating_mode_t)saved_mode;
+        mode = (wifi_operating_mode_t)saved_mode;
     }
     nvs_close(handle);
+    return mode;
+}
+
+static void load_operating_mode(void)
+{
+    operating_mode = wifi_get_selected_operating_mode();
 }
 
 esp_err_t wifi_save_operating_mode(wifi_operating_mode_t mode)
@@ -317,6 +323,16 @@ static esp_err_t load_ap_config(void)
     return err;
 }
 
+bool wifi_ap_defaults_valid(void)
+{
+    size_t ssid_len = strlen(CONFIG_ESP_DAP_SOFTAP_SSID);
+    size_t password_len = strlen(CONFIG_ESP_DAP_SOFTAP_PASSWORD);
+    return ssid_len >= 1 && ssid_len <= 32 &&
+           password_len >= 8 && password_len <= 63 &&
+           CONFIG_ESP_DAP_SOFTAP_CHANNEL >= 1 &&
+           CONFIG_ESP_DAP_SOFTAP_CHANNEL <= 11;
+}
+
 bool wifi_ap_is_configured(void)
 {
     // Validate saved settings without changing the running SoftAP config.
@@ -339,12 +355,7 @@ bool wifi_ap_is_configured(void)
             return true;
     }
 
-    size_t ssid_len = strlen(CONFIG_ESP_DAP_SOFTAP_SSID);
-    size_t password_len = strlen(CONFIG_ESP_DAP_SOFTAP_PASSWORD);
-    return ssid_len >= 1 && ssid_len <= 32 &&
-           password_len >= 8 && password_len <= 63 &&
-           CONFIG_ESP_DAP_SOFTAP_CHANNEL >= 1 &&
-           CONFIG_ESP_DAP_SOFTAP_CHANNEL <= 11;
+    return wifi_ap_defaults_valid();
 }
 
 uint8_t wifi_get_ap_channel(void)
