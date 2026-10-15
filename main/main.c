@@ -574,6 +574,12 @@ void app_main(void)
      * then force a reboot in an attempt to recover.
      */
     if (wifi_init() != 0) {
+        if (wifi_get_operating_mode() == WIFI_OPERATING_MODE_AP) {
+            fprintf(stderr, "SoftAP failed to start; network services "
+                    "disabled. Fix the settings from the serial console "
+                    "and reboot.\n");
+            return;
+        }
         fprintf(stderr, "Restarting due to WiFi connection failures.\n");
         reboot();
     }
