@@ -7,3 +7,4 @@ dependencies.lock
 main/certs/*.pem
 host/certs/
 __pycache__/
+host/.venv/
