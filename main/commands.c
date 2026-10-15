@@ -247,8 +247,6 @@ static int ap_cmd_handler(void *context, int argc, char **argv)
     return 0;
 }
 
-// WiFi mode switching is deliberately serial-only to avoid remotely dropping
-// active CMSIS-DAP and socket console TCP sessions.
 static int wifi_mode_cmd_handler(void *context, int argc, char **argv)
 {
     struct command_context *ctx = context;
@@ -640,8 +638,7 @@ static int help_cmd_handler(void *context, int argc, char **argv)
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     fprintf(out, "  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure Station credentials.\n");
     fprintf(out, "  ap \"<ssid>\" \"<password>\" [channel] - Configure SoftAP settings.\n");
-    if (ctx->transport == COMMAND_TRANSPORT_SERIAL)
-        fprintf(out, "  wifi_mode <sta|ap|default> - Select active WiFi mode after reboot.\n");
+    fprintf(out, "  wifi_mode <sta|ap|default> - Select active WiFi mode after reboot.\n");
 #endif
 #if defined(CONFIG_ESP_UART_BRIDGE_1_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
@@ -737,6 +734,7 @@ static const struct {
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     { "wifi",   wifi_cmd_handler },
     { "ap",     ap_cmd_handler },
+    { "wifi_mode", wifi_mode_cmd_handler },
 #endif
 };
 #define NUM_COMMANDS (sizeof(socket_commands) / sizeof(socket_commands[0]))

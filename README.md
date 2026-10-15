@@ -201,7 +201,7 @@ Available commands:
   help - Show this help message.
   wifi "<ssid>" "<password>" [auth_mode] - Configure Station credentials.
   ap "<ssid>" "<password>" [channel] - Configure SoftAP settings.
-  wifi_mode <sta|ap|default> - Select active WiFi mode (serial console only).
+  wifi_mode <sta|ap|default> - Select active WiFi mode.
   uart <instance> <baud_rate> <data_bits> <parity> <stop_bits> - Configure UART bridge settings.
   reboot - Restart the device.
   status - Report network status.
@@ -443,7 +443,7 @@ Info : accepting 'telnet' connection on tcp/4444
 The default operating mode can be selected in **CMSIS-DAP configuration →
 WiFi configuration → WiFi operating mode** in `idf.py menuconfig`. Both
 Station and SoftAP defaults are compiled into the firmware, so the active
-mode can also be changed later over the serial console without rebuilding.
+mode can also be changed later from the console without rebuilding.
 
 Before selecting SoftAP, configure a unique WPA2 password (8-63 bytes)
 either through menuconfig or with the `ap` console command. A blank password
@@ -482,8 +482,6 @@ overrides; this does **not** change the saved mode selection or erase Station
 credentials. Ensure menuconfig has a valid SoftAP password before clearing
 SoftAP overrides if SoftAP is the selected mode.
 
-Mode switching via `wifi_mode` is deliberately available **only on the serial
-console**, to avoid disrupting active CMSIS-DAP or TCP console connections.
 Configuration changes take effect after a reboot. The current mode and
 SoftAP SSID/channel are shown by `status`. Passwords are not printed by the
 commands, but credentials entered over a TCP console are not encrypted; use
