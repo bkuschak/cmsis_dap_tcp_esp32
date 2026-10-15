@@ -47,6 +47,8 @@ esp_err_t wifi_clear_ap_config(void);
 // after reboot; clearing the override restores the menuconfig default.
 wifi_operating_mode_t wifi_get_operating_mode(void);
 wifi_operating_mode_t wifi_get_default_operating_mode(void);
+// Mode that will be active after the next reboot (NVS override or default).
+wifi_operating_mode_t wifi_get_selected_operating_mode(void);
 esp_err_t wifi_save_operating_mode(wifi_operating_mode_t mode);
 esp_err_t wifi_clear_operating_mode(void);
 
@@ -54,6 +56,8 @@ esp_err_t wifi_clear_operating_mode(void);
 uint8_t wifi_get_ap_channel(void);
 // True if NVS overrides or menuconfig provide a valid WPA2 SoftAP setup.
 bool wifi_ap_is_configured(void);
+// True if the menuconfig SoftAP defaults alone form a valid WPA2 setup.
+bool wifi_ap_defaults_valid(void);
 
 #ifdef __cplusplus
 }

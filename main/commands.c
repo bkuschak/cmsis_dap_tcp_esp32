@@ -218,6 +218,13 @@ static int ap_cmd_handler(void *context, int argc, char **argv)
             fprintf(out, "To reset SoftAP settings use: ap \"\" \"\"\n");
             return 1;
         }
+        if (wifi_get_selected_operating_mode() == WIFI_OPERATING_MODE_AP &&
+            !wifi_ap_defaults_valid()) {
+            fprintf(out, "SoftAP is the selected mode and the menuconfig "
+                    "defaults are not a valid SoftAP setup.\n");
+            fprintf(out, "Switch away first with 'wifi_mode sta'.\n");
+            return 1;
+        }
         esp_err_t err = wifi_clear_ap_config();
         if (err != ESP_OK) {
             fprintf(out, "Error clearing SoftAP settings: %s\n",
@@ -259,21 +266,29 @@ static int wifi_mode_cmd_handler(void *context, int argc, char **argv)
     }
 
     const char *mode = ctx->wifi_mode_args.mode->sval[0];
-    esp_err_t err;
+    wifi_operating_mode_t target;
     if (strcmp(mode, "sta") == 0) {
-        err = wifi_save_operating_mode(WIFI_OPERATING_MODE_STA);
+        target = WIFI_OPERATING_MODE_STA;
     } else if (strcmp(mode, "ap") == 0) {
-        if (!wifi_ap_is_configured()) {
-            fprintf(out, "SoftAP needs a valid SSID and WPA2 password (8-63 bytes).\n");
-            fprintf(out, "Configure with 'ap' or menuconfig before switching.\n");
-            return 1;
-        }
-        err = wifi_save_operating_mode(WIFI_OPERATING_MODE_AP);
+        target = WIFI_OPERATING_MODE_AP;
     } else if (strcmp(mode, "default") == 0) {
-        err = wifi_clear_operating_mode();
+        target = wifi_get_default_operating_mode();
     } else {
         fprintf(out, "Error: expected sta, ap, or default.\n");
         return 1;
+    }
+
+    if (target == WIFI_OPERATING_MODE_AP && !wifi_ap_is_configured()) {
+        fprintf(out, "SoftAP needs a valid SSID and WPA2 password (8-63 bytes).\n");
+        fprintf(out, "Configure with 'ap' or menuconfig before switching.\n");
+        return 1;
+    }
+
+    esp_err_t err;
+    if (strcmp(mode, "default") == 0) {
+        err = wifi_clear_operating_mode();
+    } else {
+        err = wifi_save_operating_mode(target);
     }
     if (err != ESP_OK) {
         fprintf(out, "Error saving WiFi mode: %s\n", esp_err_to_name(err));
