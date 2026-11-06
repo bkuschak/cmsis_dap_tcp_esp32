@@ -977,7 +977,7 @@ menu "CMSIS-DAP configuration"
         if ESP_DAP_MANAGE_WIFI
 
         choice ESP_DAP_WIFI_MODE
-            prompt "WiFi operating mode"
+            prompt "Default WiFi operating mode"
             default ESP_DAP_WIFI_MODE_STA
             help
                 Station mode connects to an existing wireless network.
@@ -992,29 +992,6 @@ menu "CMSIS-DAP configuration"
             config ESP_DAP_WIFI_MODE_AP
                 bool "SoftAP - create a WiFi network"
         endchoice
-
-        config ESP_DAP_SOFTAP_SSID
-            string "SoftAP network name (SSID)"
-            default "ESP32 STLINK"
-            help
-                SSID advertised by the ESP32 in SoftAP mode (1-32 bytes).
-
-        config ESP_DAP_SOFTAP_PASSWORD
-            string "SoftAP WPA2 password"
-            default ""
-            help
-                Set a unique 8-63 byte password before flashing.
-                Empty passwords are intentionally rejected at startup.
-
-        config ESP_DAP_SOFTAP_CHANNEL
-            int "SoftAP WiFi channel"
-            range 1 11
-            default 1
-
-        config ESP_DAP_SOFTAP_MAX_CONNECTIONS
-            int "Maximum simultaneous SoftAP clients"
-            range 1 4
-            default 4
 
         # Keep both sets of defaults compiled in so either mode can be
         # selected via the serial console without reflashing.
@@ -1083,6 +1060,29 @@ menu "CMSIS-DAP configuration"
             config ESP_WIFI_AUTH_WAPI_PSK
                 bool "WAPI PSK"
         endchoice
+
+        config ESP_DAP_SOFTAP_SSID
+            string "SoftAP network name (SSID)"
+            default "cmsis_dap_tcp_esp32"
+            help
+                SSID advertised by the ESP32 in SoftAP mode (1-32 bytes).
+
+        config ESP_DAP_SOFTAP_PASSWORD
+            string "SoftAP WPA2 password"
+            default ""
+            help
+                Set a unique 8-63 byte password before flashing.
+                Empty passwords are intentionally rejected at startup.
+
+        config ESP_DAP_SOFTAP_CHANNEL
+            int "SoftAP WiFi channel"
+            range 1 11
+            default 1
+
+        config ESP_DAP_SOFTAP_MAX_CONNECTIONS
+            int "Maximum simultaneous SoftAP clients"
+            range 1 4
+            default 4
 
         endif
 
