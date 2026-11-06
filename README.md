@@ -532,6 +532,57 @@ the ADC reading from a current sense amplifier:
 
 ![scopeshot1](img/adc_streaming.png)
 
+## Optional GPIO control
+
+On ESP32-C3, ESP32-S3 and ESP32-C6, enable **CMSIS-DAP configuration >
+Console commands > Enable lightweight GPIO control commands**
+(`CONFIG_ESP_GPIO_CONTROL_ENABLED`). This feature is disabled by default and
+uses the existing serial and TCP consoles without creating another task.
+
+Set `CONFIG_ESP_GPIO_CONTROL_ALLOWED_PINS` to a comma-separated list of unused,
+exposed GPIO numbers for your board. The default empty list permits no pins.
+Check the board schematic before adding pins: exclude strapping pins and pins
+connected to other board peripherals. Pins reserved by ESP-IDF (including
+flash/PSRAM), configured DAP/reset/LED and UART/console pins are rejected even
+when allow-listed. Native USB and chip-debug JTAG pins remain unavailable.
+When ADC streaming is enabled, all ADC1-capable pins are excluded, since the
+ADC GPIO can change between client connections.
+
+Both consoles accept the same commands (replace `<pin>` with an allowed GPIO):
+
+```text
+gpio list
+gpio config <pin> input floating
+gpio config <pin> input up
+gpio config <pin> input down
+gpio config <pin> push-pull 0
+gpio config <pin> open-drain 1
+gpio read <pin>
+gpio write <pin> 0
+gpio clear <pin>
+```
+
+`config` applies and saves the mode, input pull and default output level in
+NVS. Saved configurations are checked against the current allow-list and pin
+restrictions before being restored at boot, before either console starts.
+The default output latch is loaded before enabling the output driver; these
+defaults take effect during application startup, not throughout reset or the
+bootloader. `write` changes the live output latch without writing flash or
+changing its boot default. Run `config` again to change the boot default.
+`clear` removes that pin's saved configuration and leaves it as a floating
+input. `read` requires a configured pin and reports its physical input level;
+`list` also shows an output's boot default and current output latch.
+
+For open-drain outputs, level 0 drives low and level 1 releases the pin. Supply
+an external pull-up to a voltage supported by the ESP32 and the connected
+device. Output modes do not enable internal pull resistors. Operations from
+simultaneous console clients are serialized with a mutex.
+
+When using this as a component, initialize NVS and call `gpio_control_init()`
+before exposing the consoles. The automatic interface exclusions follow the
+project's Kconfig settings; exclude any additional or differently assigned
+host-application pins from the allow-list yourself.
+
 # Usage as a component
 
 Two additional features were added by [@w531t4](https://github.com/w531t4) and
