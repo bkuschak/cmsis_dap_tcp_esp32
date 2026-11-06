@@ -770,6 +770,30 @@ menu "CMSIS-DAP configuration"
 
     menu "Console commands"
 
+        config ESP_GPIO_CONTROL_ENABLED
+            bool "Enable lightweight GPIO control commands"
+            default n
+            depends on ESP_DAP_SERIAL_CONSOLE_ENABLED || ESP_DAP_SOCKET_CONSOLE_ENABLED
+            depends on IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C6
+            help
+                Adds gpio list/config/read/write/clear to the existing consoles.
+                Supports digital inputs with floating/pull-up/pull-down and
+                push-pull or open-drain outputs. Configuration and boot output
+                levels are saved in NVS. No additional task is created.
+
+        config ESP_GPIO_CONTROL_ALLOWED_PINS
+            string "GPIO control allow-list (comma-separated pin numbers)"
+            default ""
+            depends on ESP_GPIO_CONTROL_ENABLED
+            help
+                Explicitly list unused, exposed board GPIOs, for example 3,11.
+                An empty list allows no pins. ESP-IDF reserved pins, configured
+                DAP/LED/UART/console pins and native USB/chip-debug JTAG pins
+                are rejected even if listed here. When ADC streaming is enabled,
+                all ADC1-capable pins are excluded because its GPIO can change
+                at runtime. Exclude board-specific peripherals, strapping pins
+                and any pins used by the host application yourself.
+
         config ESP_DAP_SERIAL_CONSOLE_ENABLED
             bool "Enable console commands over serial console (UART/USB)"
             default y

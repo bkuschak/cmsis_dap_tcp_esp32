@@ -56,6 +56,10 @@
 #include "commands.h"
 #include "reboot.h"
 
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+#include "gpio_control.h"
+#endif
+
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
 #include "wifi.h"
 #endif
@@ -564,6 +568,13 @@ void app_main(void)
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    // Restore defaults before either console can change GPIO state.
+    ret = gpio_control_init();
+    if (ret != ESP_OK)
+        fprintf(stderr, "GPIO control initialization failed: %s\n", esp_err_to_name(ret));
+#endif
 
 #ifdef CONFIG_ESP_DAP_SERIAL_CONSOLE_ENABLED
     commands_init_serial();
