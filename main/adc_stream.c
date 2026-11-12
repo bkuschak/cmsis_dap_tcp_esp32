@@ -18,6 +18,7 @@
  * Only one instance may run -- ADC1 is a single shared peripheral.
  */
 
+#include "sdkconfig.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_continuous.h"
@@ -37,6 +38,10 @@
 #include <sys/socket.h>
 #include <sys/unistd.h>
 #include "adc_stream.h"
+
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+#include "gpio_control.h"
+#endif
 
 #define ADC_STREAM_TASK_STACK_SIZE     4096
 #define ADC_STREAM_TASK_PRIORITY       5
@@ -69,6 +74,9 @@ struct adc_stream_state {
     // Effective settings, resolved by apply_adc_stream_config(): flash
     // override if present, else config->*.
     int active_gpio;
+    // Claimed before touching ADC hardware, released only after deinitializing
+    // the driver. Protected by task_states_mux and the GPIO-control mutex.
+    bool gpio_claimed;
     int active_sample_rate_hz;
     int active_averaging_count;
     enum adc_stream_format active_format;
@@ -120,14 +128,39 @@ static const char *format_str(enum adc_stream_format format)
     return format == ADC_STREAM_FORMAT_BINARY16 ? "binary16" : "text";
 }
 
+static int adc_default_gpio(void)
+{
+    int gpio = CONFIG_ESP_ADC_STREAM_GPIO;
+    portENTER_CRITICAL(&task_states_mux);
+    for (int i = 0; i < ADC_STREAM_MAX_TASKS; i++) {
+        if (task_states[i] != NULL) {
+            // A component consumer may supply a different runtime baseline.
+            gpio = task_states[i]->config->gpio;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&task_states_mux);
+    return gpio;
+}
+
 esp_err_t adc_stream_save_config(int gpio, int sample_rate_hz,
         int averaging_count, enum adc_stream_format format)
 {
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    esp_err_t lock_err = gpio_control_lock();
+    if (lock_err != ESP_OK)
+        return lock_err;
+    if (gpio_control_pin_is_configured(gpio)) {
+        fprintf(stderr, "ADC stream: GPIO%d is assigned to manual GPIO control.\n", gpio);
+        gpio_control_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+#endif
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(ADC_STREAM_CONFIG_NVS_NAMESPACE, NVS_READWRITE,
             &nvs_handle);
     if (err != ESP_OK)
-        return err;
+        goto done;
 
     err = nvs_set_i32(nvs_handle, ADC_STREAM_CONFIG_NVS_KEY_GPIO, gpio);
     if (err == ESP_OK) {
@@ -146,22 +179,41 @@ esp_err_t adc_stream_save_config(int gpio, int sample_rate_hz,
         err = nvs_commit(nvs_handle);
 
     nvs_close(nvs_handle);
+done:
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    gpio_control_unlock();
+#endif
     return err;
 }
 
 esp_err_t adc_stream_clear_config(void)
 {
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    esp_err_t lock_err = gpio_control_lock();
+    if (lock_err != ESP_OK)
+        return lock_err;
+    int gpio = adc_default_gpio();
+    if (gpio_control_pin_is_configured(gpio)) {
+        fprintf(stderr, "ADC stream: default GPIO%d is assigned to manual GPIO control.\n", gpio);
+        gpio_control_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+#endif
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(ADC_STREAM_CONFIG_NVS_NAMESPACE, NVS_READWRITE,
             &nvs_handle);
     if (err != ESP_OK)
-        return err;
+        goto done;
 
     err = nvs_erase_all(nvs_handle);
     if (err == ESP_OK)
         err = nvs_commit(nvs_handle);
 
     nvs_close(nvs_handle);
+done:
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    gpio_control_unlock();
+#endif
     return err;
 }
 
@@ -196,12 +248,51 @@ static bool load_adc_stream_config(int *gpio, int *sample_rate_hz,
     return true;
 }
 
+bool adc_stream_gpio_in_use(int gpio)
+{
+    int selected = adc_default_gpio();
+    int sample_rate_hz, averaging_count;
+    enum adc_stream_format format;
+    // Follow the effective settings, even after a failed multi-key NVS update:
+    // earlier nvs_set_* calls may already have taken effect when a later one fails.
+    load_adc_stream_config(&selected, &sample_rate_hz, &averaging_count, &format);
+    if (gpio == selected)
+        return true;
+
+    bool in_use = false;
+    portENTER_CRITICAL(&task_states_mux);
+    for (int i = 0; i < ADC_STREAM_MAX_TASKS; i++) {
+        const struct adc_stream_state *state = task_states[i];
+        if (state != NULL && state->gpio_claimed && state->active_gpio == gpio) {
+            in_use = true;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&task_states_mux);
+    return in_use;
+}
+
 // Resolves state->active_* -- flash overrides *config if present. Must not
 // modify *config (needs to stay pristine after a console 'adc' clear).
 // Called per-connection so runtime changes apply without a reboot.
-static void apply_adc_stream_config(const struct adc_stream_config *config,
-        struct adc_stream_state *state)
+static bool apply_adc_stream_config(const struct adc_stream_config *config,
+        struct adc_stream_state *state, bool claim_gpio)
 {
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    if (gpio_control_lock() != ESP_OK) {
+        fprintf(stderr, "ADC stream: initialize GPIO control before starting the ADC service.\n");
+        return false;
+    }
+#endif
+    if (state->gpio_claimed) {
+        // Failed driver cleanup must not release its old pin by switching to a
+        // new one. Refuse further connections until the device is restarted.
+        fprintf(stderr, "ADC stream: previous driver cleanup failed; reboot required.\n");
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+        gpio_control_unlock();
+#endif
+        return false;
+    }
     int gpio = config->gpio;
     int sample_rate_hz = config->sample_rate_hz;
     int averaging_count = config->averaging_count;
@@ -222,10 +313,38 @@ static void apply_adc_stream_config(const struct adc_stream_config *config,
                 averaging_count, format_str(format));
     }
 
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    if (gpio_control_pin_is_configured(gpio)) {
+        fprintf(stderr, "ADC stream: GPIO%d is assigned to manual GPIO control.\n", gpio);
+        gpio_control_unlock();
+        return false;
+    }
+#endif
+    portENTER_CRITICAL(&task_states_mux);
     state->active_gpio = gpio;
+    state->gpio_claimed = claim_gpio;
     state->active_sample_rate_hz = sample_rate_hz;
     state->active_averaging_count = averaging_count;
     state->active_format = format;
+    portEXIT_CRITICAL(&task_states_mux);
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    gpio_control_unlock();
+#endif
+    return true;
+}
+
+static void release_adc_gpio(struct adc_stream_state *state)
+{
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    if (gpio_control_lock() != ESP_OK)
+        return; // Fail closed: do not advertise a potentially active pin as free.
+#endif
+    portENTER_CRITICAL(&task_states_mux);
+    state->gpio_claimed = false;
+    portEXIT_CRITICAL(&task_states_mux);
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    gpio_control_unlock();
+#endif
 }
 
 void adc_stream_print_status(FILE *out)
@@ -342,7 +461,11 @@ static void adc_stream_task(void* arg)
 
     // Just so state.active_* has something to report before a client
     // connects -- real validation happens per-connection below.
-    apply_adc_stream_config(&config, &state);
+    if (!apply_adc_stream_config(&config, &state, false)) {
+        release_resources(slot);
+        vTaskDelete(NULL);
+        return;
+    }
 
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0) {
@@ -410,10 +533,14 @@ static void adc_stream_task(void* arg)
 
         // Reload in case settings changed via console since the last
         // connection. A bad value here only refuses this connection.
-        apply_adc_stream_config(&config, &state);
+        if (!apply_adc_stream_config(&config, &state, true)) {
+            close(client_fd);
+            continue;
+        }
 
         adc_channel_t channel;
         if (!resolve_adc1_channel(state.active_gpio, &channel)) {
+            release_adc_gpio(&state);
             close(client_fd);
             continue;
         }
@@ -424,6 +551,7 @@ static void adc_stream_task(void* arg)
             fprintf(stderr, "ADC stream: averaging (%d) must be a power of "
                     "2 (the accumulate-and-shift oversampling below relies "
                     "on it).\n", state.active_averaging_count);
+            release_adc_gpio(&state);
             close(client_fd);
             continue;
         }
@@ -438,6 +566,7 @@ static void adc_stream_task(void* arg)
                     state.active_sample_rate_hz, state.active_averaging_count,
                     raw_sample_freq_hz, SOC_ADC_SAMPLE_FREQ_THRES_LOW,
                     SOC_ADC_SAMPLE_FREQ_THRES_HIGH);
+            release_adc_gpio(&state);
             close(client_fd);
             continue;
         }
@@ -656,8 +785,14 @@ disconnect:
             adc_continuous_stop(adc_handle);
         if (cali_handle != NULL)
             adc_cali_delete_scheme_curve_fitting(cali_handle);
-        if (adc_handle != NULL)
-            adc_continuous_deinit(adc_handle);
+        bool driver_released = adc_handle == NULL ||
+            adc_continuous_deinit(adc_handle) == ESP_OK;
+        if (driver_released) {
+            release_adc_gpio(&state);
+        } else {
+            fprintf(stderr, "ADC stream: driver cleanup failed; GPIO%d remains protected. Reboot required.\n",
+                    state.active_gpio);
+        }
         free(raw_buf);
         free(parsed);
 

@@ -17,7 +17,7 @@
 #include "gpio_control.h"
 
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
-#include "esp_adc/adc_continuous.h"
+#include "adc_stream.h"
 #endif
 
 #define GPIO_NVS_NAMESPACE "gpio_control"
@@ -35,11 +35,31 @@ struct pin_config {
 };
 
 static struct pin_config pin_configs[GPIO_NUM_MAX];
+// Last successfully saved startup settings; kept separate from live changes.
+static struct pin_config saved_pin_configs[GPIO_NUM_MAX];
 static int output_levels[GPIO_NUM_MAX];
 static SemaphoreHandle_t control_mutex;
 static uint64_t allowed_pins;
-static uint64_t adc_pins;
 static bool ready;
+
+esp_err_t gpio_control_lock(void)
+{
+    if (control_mutex == NULL)
+        return ESP_ERR_INVALID_STATE;
+    return xSemaphoreTake(control_mutex, portMAX_DELAY) == pdTRUE ? ESP_OK : ESP_FAIL;
+}
+
+void gpio_control_unlock(void)
+{
+    xSemaphoreGive(control_mutex);
+}
+
+bool gpio_control_pin_is_configured(int pin)
+{
+    // Include saved startup settings, even if restoring the hardware failed.
+    return pin >= 0 && pin < GPIO_NUM_MAX &&
+        (pin_configs[pin].mode != CONTROL_UNUSED || saved_pin_configs[pin].mode != CONTROL_UNUSED);
+}
 
 static inline bool uart_default_pin(int uart, int pin)
 {
@@ -179,8 +199,10 @@ static const char *unavailable_reason(int pin)
 #error "GPIO control needs native USB/JTAG pin definitions for this target"
 #endif
         return "native USB or chip-debug JTAG pin";
-    if (adc_pins & bit)
-        return "ADC1 pin (ADC streaming is enabled)";
+#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
+    if (adc_stream_gpio_in_use(pin))
+        return "selected for ADC streaming or still in use by an ADC connection";
+#endif
     return NULL;
 }
 
@@ -193,8 +215,12 @@ static bool valid_config(int pin, const struct pin_config *config)
             config->default_level == 0 &&
             (config->pull == CONTROL_FLOATING || GPIO_IS_VALID_OUTPUT_GPIO(pin));
     }
-    return (config->mode == CONTROL_PUSH_PULL || config->mode == CONTROL_OPEN_DRAIN) &&
-        config->pull == CONTROL_FLOATING && GPIO_IS_VALID_OUTPUT_GPIO(pin);
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(pin))
+        return false;
+    if (config->mode == CONTROL_PUSH_PULL)
+        return config->pull == CONTROL_FLOATING;
+    return config->mode == CONTROL_OPEN_DRAIN &&
+        (config->pull == CONTROL_FLOATING || config->pull == CONTROL_PULL_UP);
 }
 
 static esp_err_t apply_config(int pin, const struct pin_config *config, int level)
@@ -243,7 +269,8 @@ static esp_err_t store_config(int pin, const struct pin_config *config)
 static esp_err_t change_config(int pin, const struct pin_config *config)
 {
     esp_err_t err = apply_config(pin, config, config->default_level);
-    if (err == ESP_OK)
+    // Clearing is an explicit NVS operation. Ordinary configuration is live-only.
+    if (err == ESP_OK && config->mode == CONTROL_UNUSED)
         err = store_config(pin, config);
     if (err != ESP_OK) {
         esp_err_t rollback = apply_config(pin, &pin_configs[pin], output_levels[pin]);
@@ -253,6 +280,8 @@ static esp_err_t change_config(int pin, const struct pin_config *config)
     }
     pin_configs[pin] = *config;
     output_levels[pin] = config->default_level;
+    if (config->mode == CONTROL_UNUSED)
+        saved_pin_configs[pin] = *config;
     return ESP_OK;
 }
 
@@ -312,23 +341,20 @@ esp_err_t gpio_control_init(void)
     if (control_mutex == NULL)
         return ESP_ERR_NO_MEM;
 
-#ifdef CONFIG_ESP_ADC_STREAM_ENABLED
-    // ADC GPIO can change at each connection; reserve the entire ADC1 set.
-    for (int channel = 0; channel < SOC_ADC_CHANNEL_NUM(0); channel++) {
-        int pin;
-        if (adc_continuous_channel_to_io(ADC_UNIT_1, channel, &pin) == ESP_OK && pin >= 0 && pin < 64)
-            adc_pins |= UINT64_C(1) << pin;
-    }
-#endif
-
-    nvs_handle_t handle;
-    esp_err_t err = nvs_open(GPIO_NVS_NAMESPACE, NVS_READONLY, &handle);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        ready = true;
-        return ESP_OK;
-    }
+    esp_err_t err = gpio_control_lock();
     if (err != ESP_OK)
         return err;
+    nvs_handle_t handle;
+    err = nvs_open(GPIO_NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ready = true;
+        gpio_control_unlock();
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        gpio_control_unlock();
+        return err;
+    }
     for (int pin = 0; pin < GPIO_NUM_MAX && pin < 64; pin++) {
         char key[8];
         snprintf(key, sizeof(key), "p%d", pin);
@@ -342,6 +368,7 @@ esp_err_t gpio_control_init(void)
             fprintf(stderr, "GPIO%d: ignoring invalid or unavailable saved configuration.\n", pin);
             continue;
         }
+        saved_pin_configs[pin] = config;
         err = apply_config(pin, &config, config.default_level);
         if (err == ESP_OK) {
             pin_configs[pin] = config;
@@ -352,6 +379,7 @@ esp_err_t gpio_control_init(void)
     }
     nvs_close(handle);
     ready = true;
+    gpio_control_unlock();
     return ESP_OK;
 }
 
@@ -359,12 +387,15 @@ static void print_usage(FILE *out)
 {
     fprintf(out, "Usage:\n"
             "  gpio list\n"
-            "  gpio config <pin> input <floating|up|down>\n"
-            "  gpio config <pin> <push-pull|open-drain> <0|1>\n"
+            "  gpio config <pin> input <floating|pull-up|pull-down>\n"
+            "  gpio config <pin> push-pull <0|1>\n"
+            "  gpio config <pin> open-drain <0|1> [floating|pull-up]\n"
             "  gpio read <pin>\n"
             "  gpio write <pin> <0|1>\n"
+            "  gpio save <pin>\n"
             "  gpio clear <pin>\n"
-            "config saves settings and the boot level; write changes only the live level.\n");
+            "config and write change only live state; save stores live state as startup defaults.\n"
+            "clear removes saved settings and leaves a floating input.\n");
 }
 
 static int run_command(FILE *out, int argc, char **argv)
@@ -380,26 +411,44 @@ static int run_command(FILE *out, int argc, char **argv)
                 fprintf(out, "GPIO%d: unavailable: %s\n", pin, reason);
                 continue;
             }
+            const char *pulls[] = { "floating", "pull-up", "pull-down" };
             const struct pin_config *config = &pin_configs[pin];
             if (config->mode == CONTROL_UNUSED) {
                 fprintf(out, "GPIO%d: available, unconfigured\n", pin);
             } else if (config->mode == CONTROL_INPUT) {
-                const char *pulls[] = { "floating", "up", "down" };
                 fprintf(out, "GPIO%d: input %s, level=%d\n", pin, pulls[config->pull], gpio_get_level(pin));
+            } else if (config->mode == CONTROL_OPEN_DRAIN) {
+                fprintf(out, "GPIO%d: open-drain %s, latch=%d, level=%d\n", pin,
+                        pulls[config->pull], output_levels[pin], gpio_get_level(pin));
             } else {
-                fprintf(out, "GPIO%d: %s, boot=%u, latch=%d, level=%d\n", pin,
-                        config->mode == CONTROL_OPEN_DRAIN ? "open-drain" : "push-pull",
-                        (unsigned)config->default_level, output_levels[pin], gpio_get_level(pin));
+                fprintf(out, "GPIO%d: push-pull, latch=%d, level=%d\n", pin,
+                        output_levels[pin], gpio_get_level(pin));
+            }
+            const struct pin_config *saved = &saved_pin_configs[pin];
+            if (saved->mode == CONTROL_UNUSED) {
+                fprintf(out, "  Saved startup: none\n");
+            } else if (saved->mode == CONTROL_INPUT) {
+                fprintf(out, "  Saved startup: input %s\n", pulls[saved->pull]);
+            } else if (saved->mode == CONTROL_OPEN_DRAIN) {
+                fprintf(out, "  Saved startup: open-drain %s, level=%u\n",
+                        pulls[saved->pull], (unsigned)saved->default_level);
+            } else {
+                fprintf(out, "  Saved startup: push-pull, level=%u\n", (unsigned)saved->default_level);
             }
         }
         return 0;
     }
 
-    bool configure = argc == 5 && strcmp(argv[1], "config") == 0;
+    bool configure = (argc == 5 || argc == 6) && strcmp(argv[1], "config") == 0;
     bool read = argc == 3 && strcmp(argv[1], "read") == 0;
     bool write = argc == 4 && strcmp(argv[1], "write") == 0;
+    bool save = argc == 3 && strcmp(argv[1], "save") == 0;
     bool clear = argc == 3 && strcmp(argv[1], "clear") == 0;
-    if (!configure && !read && !write && !clear) {
+    if (!configure && !read && !write && !save && !clear) {
+        print_usage(out);
+        return 1;
+    }
+    if (configure && argc == 6 && strcmp(argv[3], "open-drain") != 0) {
         print_usage(out);
         return 1;
     }
@@ -421,9 +470,9 @@ static int run_command(FILE *out, int argc, char **argv)
             config.mode = CONTROL_INPUT;
             if (strcmp(argv[4], "floating") == 0)
                 config.pull = CONTROL_FLOATING;
-            else if (strcmp(argv[4], "up") == 0)
+            else if (strcmp(argv[4], "pull-up") == 0)
                 config.pull = CONTROL_PULL_UP;
-            else if (strcmp(argv[4], "down") == 0)
+            else if (strcmp(argv[4], "pull-down") == 0)
                 config.pull = CONTROL_PULL_DOWN;
             else {
                 print_usage(out);
@@ -444,6 +493,16 @@ static int run_command(FILE *out, int argc, char **argv)
                 return 1;
             }
             config.default_level = level;
+            if (argc == 6) {
+                if (strcmp(argv[5], "floating") == 0)
+                    config.pull = CONTROL_FLOATING;
+                else if (strcmp(argv[5], "pull-up") == 0)
+                    config.pull = CONTROL_PULL_UP;
+                else {
+                    print_usage(out);
+                    return 1;
+                }
+            }
         }
         if (!valid_config(pin, &config)) {
             fprintf(out, "Error: GPIO%d does not support this mode or pull resistor.\n", pin);
@@ -459,6 +518,13 @@ static int run_command(FILE *out, int argc, char **argv)
     } else if (read) {
         fprintf(out, "GPIO%d: %d\n", pin, gpio_get_level(pin));
         return 0;
+    } else if (save) {
+        struct pin_config snapshot = pin_configs[pin];
+        // Save the output latch, not the measured level (important for open-drain).
+        snapshot.default_level = snapshot.mode == CONTROL_INPUT ? 0 : output_levels[pin];
+        err = store_config(pin, &snapshot);
+        if (err == ESP_OK)
+            saved_pin_configs[pin] = snapshot;
     } else if (write) {
         int level;
         if (pin_configs[pin].mode == CONTROL_INPUT || !parse_number(argv[3], 1, &level)) {
@@ -474,7 +540,9 @@ static int run_command(FILE *out, int argc, char **argv)
         return 1;
     }
     fprintf(out, "GPIO%d: %s.\n", pin, write ? "live level updated (not saved)" :
-            clear ? "saved configuration removed; floating input" : "configuration applied and saved");
+            clear ? "saved configuration removed; floating input" :
+            save ? "current configuration saved as startup defaults" :
+            "live configuration applied (not saved)");
     return 0;
 }
 
@@ -484,8 +552,11 @@ int gpio_control_command(FILE *out, int argc, char **argv)
         fprintf(out, "Error: GPIO control is not initialized.\n");
         return 1;
     }
-    xSemaphoreTake(control_mutex, portMAX_DELAY);
+    if (gpio_control_lock() != ESP_OK) {
+        fprintf(out, "Error: GPIO control lock is unavailable.\n");
+        return 1;
+    }
     int result = run_command(out, argc, argv);
-    xSemaphoreGive(control_mutex);
+    gpio_control_unlock();
     return result;
 }

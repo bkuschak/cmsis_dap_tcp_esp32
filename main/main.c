@@ -570,7 +570,8 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
 #ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
-    // Restore defaults before either console can change GPIO state.
+    // Restore GPIO defaults before consoles/services start. Restoration checks
+    // the effective ADC pin (NVS override or Kconfig default) for conflicts.
     ret = gpio_control_init();
     if (ret != ESP_OK)
         fprintf(stderr, "GPIO control initialization failed: %s\n", esp_err_to_name(ret));

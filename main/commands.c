@@ -657,7 +657,7 @@ static int help_cmd_handler(void *context, int argc, char **argv)
     fprintf(out, "Available commands:\n");
     fprintf(out, "  help - Show this help message.\n");
 #ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
-    fprintf(out, "  gpio list/config/read/write/clear - Control allowed GPIOs; run gpio for usage.\n");
+    fprintf(out, "  gpio list/config/read/write/save/clear - Control allowed GPIOs; run gpio for usage.\n");
 #endif
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     fprintf(out, "  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure Station credentials.\n");
