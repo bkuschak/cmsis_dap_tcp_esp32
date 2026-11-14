@@ -823,7 +823,7 @@ menu "CMSIS-DAP configuration"
 
         config ESP_GPIO_CONTROL_ENABLED
             bool "Enable lightweight GPIO control commands"
-            default y
+            default n
             depends on ESP_DAP_SERIAL_CONSOLE_ENABLED || ESP_DAP_SOCKET_CONSOLE_ENABLED
             depends on IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C6
             help
@@ -833,8 +833,8 @@ menu "CMSIS-DAP configuration"
                 live state; use save to store the current configuration and
                 output level as startup defaults in NVS. Clear removes saved
                 settings and leaves a floating input. No additional task is created.
-                Enabled by default, but no GPIOs can be controlled until the
-                allow-list below is explicitly configured.
+                Disabled by default. Enable this feature and configure the
+                allow-list below to control GPIOs appropriate for your board.
 
         config ESP_GPIO_CONTROL_ALLOWED_PINS
             string "GPIO control allow-list (comma-separated pin numbers)"

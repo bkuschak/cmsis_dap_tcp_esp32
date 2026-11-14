@@ -627,15 +627,18 @@ the ADC reading from a current sense amplifier:
 
 On ESP32-C3, ESP32-S3 and ESP32-C6, configure **CMSIS-DAP configuration >
 Manual GPIO control > Enable lightweight GPIO control commands**
-(`CONFIG_ESP_GPIO_CONTROL_ENABLED`). This feature is enabled by default when
-at least one console is enabled, and can be disabled to omit GPIO control
-from the build. It uses the existing serial and TCP consoles without
-creating another task. Existing sdkconfig files that explicitly disable it
-keep that setting until it is changed in menuconfig.
+(`CONFIG_ESP_GPIO_CONTROL_ENABLED`). This feature is disabled by default.
+Enable at least one console to make the option available. It uses the existing
+serial and TCP consoles without creating another task. Existing sdkconfig
+files that explicitly enable it keep that setting until it is changed in
+menuconfig.
 
 Set `CONFIG_ESP_GPIO_CONTROL_ALLOWED_PINS` to a comma-separated list of unused,
 exposed GPIO numbers for your board. The default empty list permits no pins,
 including restoration of any previously saved GPIO configurations.
+When GPIO control is enabled, the `status` command shows the configured GPIO
+allow-list, or `(none)` when it is empty. Use `gpio list` for each pin's
+availability and configuration.
 Check the board schematic before adding pins: exclude strapping pins and pins
 connected to other board peripherals. Pins reserved by ESP-IDF (including
 flash/PSRAM), configured DAP/reset/LED and UART/console pins are rejected even
@@ -648,6 +651,7 @@ Both consoles accept the same commands (replace `<pin>` with an allowed GPIO):
 
 ```text
 gpio list
+gpio config <pin> input
 gpio config <pin> input floating
 gpio config <pin> input pull-up
 gpio config <pin> input pull-down
@@ -660,15 +664,18 @@ gpio save <pin>
 gpio clear <pin>
 ```
 
+For inputs, the pull argument is optional and defaults to `floating`. The
+explicit `floating`, `pull-up` and `pull-down` options remain available.
+
 `config` applies the mode, input pull and initial output level only at runtime.
-`write` changes only the live output latch. Neither command writes NVS or
+`write` changes only the commanded output level. Neither command writes NVS or
 changes previously saved startup settings, so scripts can reconfigure pins
 repeatedly without writing flash.
 
 Use `save <pin>` to explicitly save that pin's current mode, input pull and
-output latch level as its startup defaults in NVS. For example, configuring
+commanded output level as its startup defaults in NVS. For example, configuring
 an output at 0, writing 1, then saving it makes its startup level 1. For
-open-drain outputs, the latch is saved, not the measured pin voltage.
+open-drain outputs, the commanded level is saved, not the measured pin voltage.
 Unsaved changes are lost on reboot; previously saved settings are restored.
 Saved configurations are checked against the current allow-list and pin
 restrictions before being restored, before either console starts.
@@ -679,7 +686,8 @@ bootloader.
 `clear <pin>` explicitly removes that pin's saved configuration and leaves it
 as a floating input. Only `save` and `clear` write GPIO settings to NVS.
 `read` and `save` require a configured pin. `read` reports its physical input
-level; `list` shows live state and saved startup settings separately.
+level; `list` shows live state and saved startup settings separately. For outputs,
+`commanded` is the requested output level and `level` is the measured pin state.
 
 For open-drain outputs, level 0 drives low and level 1 releases the pin. The
 optional final argument is `floating` (the default) or `pull-up`. `pull-up`

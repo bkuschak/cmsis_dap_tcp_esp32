@@ -387,7 +387,7 @@ static void print_usage(FILE *out)
 {
     fprintf(out, "Usage:\n"
             "  gpio list\n"
-            "  gpio config <pin> input <floating|pull-up|pull-down>\n"
+            "  gpio config <pin> input [floating|pull-up|pull-down]\n"
             "  gpio config <pin> push-pull <0|1>\n"
             "  gpio config <pin> open-drain <0|1> [floating|pull-up]\n"
             "  gpio read <pin>\n"
@@ -418,10 +418,10 @@ static int run_command(FILE *out, int argc, char **argv)
             } else if (config->mode == CONTROL_INPUT) {
                 fprintf(out, "GPIO%d: input %s, level=%d\n", pin, pulls[config->pull], gpio_get_level(pin));
             } else if (config->mode == CONTROL_OPEN_DRAIN) {
-                fprintf(out, "GPIO%d: open-drain %s, latch=%d, level=%d\n", pin,
+                fprintf(out, "GPIO%d: open-drain %s, commanded=%d, level=%d\n", pin,
                         pulls[config->pull], output_levels[pin], gpio_get_level(pin));
             } else {
-                fprintf(out, "GPIO%d: push-pull, latch=%d, level=%d\n", pin,
+                fprintf(out, "GPIO%d: push-pull, commanded=%d, level=%d\n", pin,
                         output_levels[pin], gpio_get_level(pin));
             }
             const struct pin_config *saved = &saved_pin_configs[pin];
@@ -439,7 +439,7 @@ static int run_command(FILE *out, int argc, char **argv)
         return 0;
     }
 
-    bool configure = (argc == 5 || argc == 6) && strcmp(argv[1], "config") == 0;
+    bool configure = (argc >= 4 && argc <= 6) && strcmp(argv[1], "config") == 0;
     bool read = argc == 3 && strcmp(argv[1], "read") == 0;
     bool write = argc == 4 && strcmp(argv[1], "write") == 0;
     bool save = argc == 3 && strcmp(argv[1], "save") == 0;
@@ -448,7 +448,8 @@ static int run_command(FILE *out, int argc, char **argv)
         print_usage(out);
         return 1;
     }
-    if (configure && argc == 6 && strcmp(argv[3], "open-drain") != 0) {
+    if (configure && ((argc == 4 && strcmp(argv[3], "input") != 0) ||
+                      (argc == 6 && strcmp(argv[3], "open-drain") != 0))) {
         print_usage(out);
         return 1;
     }
@@ -468,11 +469,12 @@ static int run_command(FILE *out, int argc, char **argv)
         struct pin_config config = { .version = GPIO_CONFIG_VERSION };
         if (strcmp(argv[3], "input") == 0) {
             config.mode = CONTROL_INPUT;
-            if (strcmp(argv[4], "floating") == 0)
+            const char *pull_name = argc == 4 ? "floating" : argv[4];
+            if (strcmp(pull_name, "floating") == 0)
                 config.pull = CONTROL_FLOATING;
-            else if (strcmp(argv[4], "pull-up") == 0)
+            else if (strcmp(pull_name, "pull-up") == 0)
                 config.pull = CONTROL_PULL_UP;
-            else if (strcmp(argv[4], "pull-down") == 0)
+            else if (strcmp(pull_name, "pull-down") == 0)
                 config.pull = CONTROL_PULL_DOWN;
             else {
                 print_usage(out);
