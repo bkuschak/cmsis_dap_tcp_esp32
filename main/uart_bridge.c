@@ -532,6 +532,13 @@ static void uart_bridge_task(void* arg)
                         client_transport = NULL;
                     }
 
+                    // No newline translation.
+                    uart_vfs_dev_port_set_rx_line_endings(config.uart_num,
+                            ESP_LINE_ENDINGS_LF);
+                    uart_vfs_dev_port_set_tx_line_endings(config.uart_num,
+                            ESP_LINE_ENDINGS_LF);
+
+
                     int flags = fcntl(uart_fd, F_GETFL, 0);
                     fcntl(uart_fd, F_SETFL, flags | O_NONBLOCK);
 
