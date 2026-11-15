@@ -68,9 +68,12 @@ if [ -n "${FORCE}" ] || [ ! -f "${MAIN_CERTS_DIR}/servercert.pem" ]; then
     echo "Generating server cert (CN=${SERVER_CN})..."
     openssl ecparam -name prime256v1 -genkey -noout -out prvtkey.pem
     openssl req -new -key prvtkey.pem -subj "/CN=${SERVER_CN}" -out server.csr
+    # serverAuth only: the key is embedded in the firmware, so the cert must
+    # not be usable as a client cert (the device checks clientAuth on clients).
+    printf 'keyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n' > server.ext
     openssl x509 -req -in server.csr -CA cacert.pem -CAkey ca.key -CAcreateserial \
-        -days 3650 -sha256 -out servercert.pem
-    rm -f server.csr
+        -days 3650 -sha256 -extfile server.ext -out servercert.pem
+    rm -f server.csr server.ext
     # The server's own cert/key have no business sitting in the client cert
     # directory once copied; cacert.pem is symlinked (not copied) so
     # host/certs/ stays the single real copy, paired with ca.key.
