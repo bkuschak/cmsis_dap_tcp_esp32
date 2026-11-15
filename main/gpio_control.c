@@ -333,13 +333,15 @@ esp_err_t gpio_control_init(void)
 {
     if (control_mutex != NULL)
         return ESP_ERR_INVALID_STATE;
+    // Create the mutex first: ADC streaming locks it, so it must exist even
+    // if the allow-list is invalid (ready stays false, no pins are allowed).
+    control_mutex = xSemaphoreCreateMutex();
+    if (control_mutex == NULL)
+        return ESP_ERR_NO_MEM;
     if (!parse_allowed_pins()) {
         fprintf(stderr, "GPIO control: invalid Kconfig allow-list; control disabled.\n");
         return ESP_ERR_INVALID_ARG;
     }
-    control_mutex = xSemaphoreCreateMutex();
-    if (control_mutex == NULL)
-        return ESP_ERR_NO_MEM;
 
     esp_err_t err = gpio_control_lock();
     if (err != ESP_OK)
