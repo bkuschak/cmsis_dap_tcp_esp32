@@ -37,9 +37,11 @@ cd "${OUT_DIR}/clients"
 echo "Generating client cert (CN=${NAME})..."
 openssl ecparam -name prime256v1 -genkey -noout -out "${NAME}.key"
 openssl req -new -key "${NAME}.key" -subj "/CN=${NAME}" -out "${NAME}.csr"
+# clientAuth only, so a client cert can't pass as a server cert either.
+printf 'keyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\n' > "${NAME}.ext"
 openssl x509 -req -in "${NAME}.csr" -CA "${OUT_DIR}/cacert.pem" -CAkey "${OUT_DIR}/ca.key" \
-    -CAcreateserial -days 3650 -sha256 -out "${NAME}.pem"
-rm -f "${NAME}.csr"
+    -CAcreateserial -days 3650 -sha256 -extfile "${NAME}.ext" -out "${NAME}.pem"
+rm -f "${NAME}.csr" "${NAME}.ext"
 
 echo
 echo "Client cert serial (for a future cert allowlist/blocklist):"

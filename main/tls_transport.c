@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include "esp_timer.h"
@@ -40,9 +41,17 @@
 // instances, plus however many simultaneous socket console connections.
 #define TRANSPORT_MAX_HANDLES   16
 
+// transport_write_all() gives up on a peer that accepts no bytes for this
+// long (a zero TCP window from a client that stopped reading).
+#define TRANSPORT_WRITE_STALL_MS    5000
+
 struct transport_s {
     int fd;
     bool suppress_io;       // see transport_suppress_io()
+    // Set when a write gave up on a stalled peer. With TLS the session can't
+    // be used after that (a half-sent record is still queued, and mbedTLS
+    // would treat the next write as its retry), so all further I/O fails.
+    bool broken;
 #if CONFIG_ESP_TLS_ENABLED
     mbedtls_net_context net;   // wraps fd for mbedtls_net_send/recv's bio ctx
     mbedtls_ssl_context ssl;
@@ -140,6 +149,47 @@ static void log_mbedtls_error(const char *what, int ret)
     fprintf(stderr, "tls_transport: %s: %s (ret=%d)\n", what, buf, ret);
 }
 
+// Handshake-only receive callback: like mbedtls_net_recv(), but one deadline
+// covers the whole handshake. SO_RCVTIMEO only bounds each recv(), and
+// mbedtls_ssl_handshake() keeps reading internally while bytes keep arriving,
+// so a peer trickling bytes slower than that timeout would never return
+// control to a caller-side deadline check.
+struct hs_bio {
+    int fd;
+    int64_t deadline_us;
+};
+
+static int hs_bio_recv(void *ctx, unsigned char *buf, size_t len)
+{
+    struct hs_bio *b = ctx;
+    int64_t remaining_us = b->deadline_us - esp_timer_get_time();
+    if (remaining_us <= 0)
+        return MBEDTLS_ERR_SSL_TIMEOUT;
+
+    struct timeval tv = {
+        .tv_sec = remaining_us / 1000000,
+        .tv_usec = remaining_us % 1000000,
+    };
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(b->fd, &rfds);
+    int r = select(b->fd + 1, &rfds, NULL, NULL, &tv);
+    if (r == 0)
+        return MBEDTLS_ERR_SSL_TIMEOUT;
+    if (r < 0)
+        return errno == EINTR ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
+
+    ssize_t n = recv(b->fd, buf, len, 0);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return MBEDTLS_ERR_SSL_WANT_READ;
+        if (errno == EPIPE || errno == ECONNRESET)
+            return MBEDTLS_ERR_NET_CONN_RESET;
+        return MBEDTLS_ERR_NET_RECV_FAILED;
+    }
+    return (int)n;
+}
+
 #endif // CONFIG_ESP_TLS_ENABLED
 
 esp_err_t tls_transport_global_init(void)
@@ -224,7 +274,13 @@ transport_handle_t transport_wrap(int fd)
         free(t);
         return NULL;
     }
-    mbedtls_ssl_set_bio(&t->ssl, &t->net, mbedtls_net_send, mbedtls_net_recv, NULL);
+    // Total handshake budget; enforced in hs_bio_recv() below.
+    struct hs_bio hs = {
+        .fd = fd,
+        .deadline_us = esp_timer_get_time() +
+                (int64_t)CONFIG_ESP_TLS_HANDSHAKE_TIMEOUT_MS * 1000,
+    };
+    mbedtls_ssl_set_bio(&t->ssl, &hs, mbedtls_net_send, hs_bio_recv, NULL);
 
     // Bound the handshake -- most of this project's services accept only
     // one client at a time, so a client that opens the TCP connection but
@@ -238,16 +294,17 @@ transport_handle_t transport_wrap(int fd)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-    // SO_RCVTIMEO/SO_SNDTIMEO only bound each individual recv()/send(), not
-    // this whole retry loop -- a peer that keeps the handshake alive one
-    // slow byte at a time could otherwise wedge it forever. Bound the total
-    // elapsed time too.
-    int64_t deadline_us = esp_timer_get_time() +
-            (int64_t)CONFIG_ESP_TLS_HANDSHAKE_TIMEOUT_MS * 1000;
+    // SO_SNDTIMEO bounds each send(); hs_bio_recv() enforces the overall
+    // deadline on the receive side. The loop only retries WANT_READ/WANT_WRITE
+    // from EINTR and the like.
     do {
         ret = mbedtls_ssl_handshake(&t->ssl);
     } while ((ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
-            && esp_timer_get_time() < deadline_us);
+            && esp_timer_get_time() < hs.deadline_us);
+
+    // hs lives on this stack frame: switch to the permanent receive callback
+    // before anything else can touch the BIO.
+    mbedtls_ssl_set_bio(&t->ssl, &t->net, mbedtls_net_send, mbedtls_net_recv, NULL);
 
     struct timeval no_tv = {0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &no_tv, sizeof(no_tv));
@@ -267,6 +324,13 @@ transport_handle_t transport_wrap(int fd)
         printf("TLS: client authenticated, cert subject: %s\n", subject);
     }
 #endif // CONFIG_ESP_TLS_ENABLED
+
+    // Blocking sockets (the console) would otherwise block in write()
+    // forever on a peer that stopped reading. A 1 s send timeout makes
+    // write() return EAGAIN periodically, so transport_write_all() can
+    // enforce TRANSPORT_WRITE_STALL_MS. No effect on non-blocking sockets.
+    struct timeval snd_tv = { .tv_sec = 1 };
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &snd_tv, sizeof(snd_tv));
 
     if (!registry_add(t)) {
         fprintf(stderr, "tls_transport: handle registry full, dropping "
@@ -305,6 +369,10 @@ int transport_fd(transport_handle_t t)
 
 ssize_t transport_read(transport_handle_t t, void *buf, size_t len)
 {
+    if (t->broken) {
+        errno = ECONNRESET;
+        return -1;
+    }
 #if CONFIG_ESP_TLS_ENABLED
     int ret = mbedtls_ssl_read(&t->ssl, buf, len);
     if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -326,6 +394,10 @@ ssize_t transport_read(transport_handle_t t, void *buf, size_t len)
 
 ssize_t transport_write(transport_handle_t t, const void *buf, size_t len)
 {
+    if (t->broken) {
+        errno = ECONNRESET;
+        return -1;
+    }
 #if CONFIG_ESP_TLS_ENABLED
     int ret = mbedtls_ssl_write(&t->ssl, buf, len);
     if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -347,6 +419,7 @@ int transport_write_all(transport_handle_t t, const void *buf, size_t len)
 {
     const uint8_t *p = buf;
     size_t sent = 0;
+    int64_t stall_start_us = 0;     // 0 = not currently stalled
 
     while (sent < len) {
         ssize_t n = transport_write(t, p + sent, len - sent);
@@ -357,11 +430,24 @@ int transport_write_all(transport_handle_t t, const void *buf, size_t len)
                 // Non-blocking socket with a full send buffer, or mbedTLS
                 // signaling WANT_READ/WANT_WRITE mid-record: wait briefly
                 // and retry (with the same buf/len, satisfying mbedTLS's
-                // retry contract) rather than treating this as fatal. A
-                // genuinely dead peer is eventually caught here too, since
-                // TCP keepalives (configured by each module right after
-                // accept()) turn into a real error once probes are
-                // exhausted.
+                // retry contract) rather than treating this as fatal.
+                // TCP keepalives don't help against a peer that is alive
+                // but has stopped reading (zero window, probes still
+                // answered), so give up if no bytes go out for
+                // TRANSPORT_WRITE_STALL_MS. Any progress resets the timer.
+                int64_t now_us = esp_timer_get_time();
+                if (stall_start_us == 0) {
+                    stall_start_us = now_us;
+                } else if (now_us - stall_start_us >
+                        (int64_t)TRANSPORT_WRITE_STALL_MS * 1000) {
+                    fprintf(stderr, "tls_transport: peer not reading for "
+                            "%d ms, giving up on write.\n",
+                            TRANSPORT_WRITE_STALL_MS);
+                    t->broken = true;
+                    shutdown(t->fd, SHUT_RDWR);   // reads now see EOF too
+                    errno = ETIMEDOUT;
+                    return -1;
+                }
                 // pdMS_TO_TICKS(1) truncates to 0 at this project's 100Hz
                 // tick rate, which would turn this into a busy taskYIELD()
                 // spin instead of a real wait -- force at least 1 tick.
@@ -372,6 +458,7 @@ int transport_write_all(transport_handle_t t, const void *buf, size_t len)
             return -1;
         }
         sent += (size_t)n;
+        stall_start_us = 0;
     }
     return 0;
 }

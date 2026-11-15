@@ -20,11 +20,19 @@ even by accident. Use `host/cert_info.sh` to inspect either directory.
 Note: currently we don't use unique server certificates for each device. Certs
 are shared across every board preset you build, regardless of which workflow
 below populates them. One CA cert and one set of client certs work across all
-devices. Sharing the server cert/key this way should be safe: `stunnel` already
-verifies the server cert chains to our CA, rejecting anyone else's. It doesn't
-check *which* CA-signed device you're talking to (no `checkHost`/`checkIP`, see
-`SERVER_CN` below), so `stunnel` wouldn't gain anything from a unique key per
-board. This might be improved in the future if there's a need.
+devices. `stunnel` verifies the server cert chains to our CA, rejecting anyone
+else's. It doesn't check *which* CA-signed device you're talking to (no
+`checkHost`/`checkIP`, see `SERVER_CN` below), so it wouldn't gain anything
+from a unique key per board. But the server key is embedded in the firmware,
+so anyone who can read a flash image can impersonate a device to `stunnel`
+clients. Keep that in mind when sharing images.
+
+Server and client certs carry key usages: the server cert is `serverAuth` only
+and client certs are `clientAuth` only, so the embedded server key cannot be
+used to authenticate *as a client*. The device rejects a client cert whose
+extended key usage does not include `clientAuth`. Certs issued before this
+change have no key usage, and the server cert from them is still accepted as a
+client cert; regenerate them with `FORCE=1` (see Workflow 1).
 
 ## Workflow 1: this project generates all the certificates
 This is the default. `idf.py build` runs `gen_esp32_certs.sh` the first time
@@ -65,6 +73,10 @@ Place your client certs and keys into this directory:
 cp /path/to/your/client1.pem     host/certs/clients/client1.pem
 cp /path/to/your/client1.key     host/certs/clients/client1.key
 ```
+
+Give the ESP32 cert `extendedKeyUsage=serverAuth` and the client certs
+`extendedKeyUsage=clientAuth`. Without them the ESP32 cert would be accepted
+as a client cert.
 
 Build and flash as usual.
 

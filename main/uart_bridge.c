@@ -602,9 +602,21 @@ static void uart_bridge_task(void* arg)
             else {
                 state.count_rx += ret;
                 if (transport_write_all(client_transport, state.buffer,
-                        ret) != 0)
-                    fprintf(stderr, "UART bridge %d: socket write error: %s\n",
+                        ret) != 0) {
+                    // Dead or stalled client: drop it so the bridge is free
+                    // for the next one, instead of retrying on every chunk.
+                    fprintf(stderr, "UART bridge %d: socket write error: %s; "
+                            "disconnecting client.\n",
                             task_state->config->instance, strerror(errno));
+                    transport_close(client_transport);
+                    close(uart_fd);
+                    client_transport = NULL;
+                    uart_fd = -1;
+                    state.count_rx = 0;
+                    state.count_tx = 0;
+                    state.client_connected = false;
+                    continue;       // restart select() loop
+                }
             }
         }
     }
