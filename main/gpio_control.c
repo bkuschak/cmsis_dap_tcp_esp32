@@ -233,11 +233,10 @@ static esp_err_t apply_config(int pin, const struct pin_config *config, int leve
         .intr_type = GPIO_INTR_DISABLE,
     };
     if (config->mode == CONTROL_PUSH_PULL || config->mode == CONTROL_OPEN_DRAIN) {
-        // Load the latch before enabling output, including after reboot.
-        esp_err_t err = gpio_set_direction(pin, GPIO_MODE_INPUT);
-        if (err != ESP_OK)
-            return err;
-        err = gpio_set_level(pin, level);
+        // Load the latch before enabling output, including after reboot. The
+        // latch can be written with the driver on or off, so an output that
+        // is already driving is never released while reconfiguring.
+        esp_err_t err = gpio_set_level(pin, level);
         if (err != ESP_OK)
             return err;
         hw.mode = config->mode == CONTROL_OPEN_DRAIN ? GPIO_MODE_INPUT_OUTPUT_OD : GPIO_MODE_INPUT_OUTPUT;
