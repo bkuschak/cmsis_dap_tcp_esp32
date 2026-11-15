@@ -8,7 +8,7 @@
 
 #include "sdkconfig.h"
 #include "driver/gpio.h"
-#include "esp_private/esp_gpio_reserve.h"
+#include "gpio_reserved.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "nvs.h"
@@ -184,7 +184,7 @@ static const char *unavailable_reason(int pin)
     uint64_t bit = UINT64_C(1) << pin;
     if (!(allowed_pins & bit))
         return "not in the Kconfig allow-list";
-    if (esp_gpio_is_reserved(bit))
+    if (gpio_pin_reserved(bit))
         return "reserved by ESP-IDF (for example flash/PSRAM)";
     if (interface_pin(pin))
         return "used by a configured DAP, LED, UART or console interface";
@@ -341,6 +341,9 @@ esp_err_t gpio_control_init(void)
         fprintf(stderr, "GPIO control: invalid Kconfig allow-list; control disabled.\n");
         return ESP_ERR_INVALID_ARG;
     }
+#if !GPIO_RESERVED_CHECK_AVAILABLE
+    fprintf(stderr, "GPIO control: reserved-pin check unavailable. Verify the allow-list.\n");
+#endif
 
     esp_err_t err = gpio_control_lock();
     if (err != ESP_OK)
@@ -402,6 +405,9 @@ static void print_usage(FILE *out)
 static int run_command(FILE *out, int argc, char **argv)
 {
     if (argc == 2 && strcmp(argv[1], "list") == 0) {
+#if !GPIO_RESERVED_CHECK_AVAILABLE
+        fprintf(out, "WARNING: reserved-pin check unavailable. Verify the allow-list.\n");
+#endif
         if (allowed_pins == 0)
             fprintf(out, "No GPIOs allowed. Set ESP_GPIO_CONTROL_ALLOWED_PINS in menuconfig.\n");
         for (int pin = 0; pin < GPIO_NUM_MAX && pin < 64; pin++) {
