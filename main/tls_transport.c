@@ -41,8 +41,16 @@
 // instances, plus however many simultaneous socket console connections.
 #define TRANSPORT_MAX_HANDLES   16
 
+// transport_write_all() gives up on a peer that accepts no bytes for this
+// long (a zero TCP window from a client that stopped reading).
+#define TRANSPORT_WRITE_STALL_MS    5000
+
 struct transport_s {
     int fd;
+    // Set when a write gave up on a stalled peer. With TLS the session can't
+    // be used after that (a half-sent record is still queued, and mbedTLS
+    // would treat the next write as its retry), so all further I/O fails.
+    bool broken;
 #if CONFIG_ESP_TLS_ENABLED
     mbedtls_net_context net;   // wraps fd for mbedtls_net_send/recv's bio ctx
     mbedtls_ssl_context ssl;
@@ -316,6 +324,13 @@ transport_handle_t transport_wrap(int fd)
     }
 #endif // CONFIG_ESP_TLS_ENABLED
 
+    // Blocking sockets (the console) would otherwise block in write()
+    // forever on a peer that stopped reading. A 1 s send timeout makes
+    // write() return EAGAIN periodically, so transport_write_all() can
+    // enforce TRANSPORT_WRITE_STALL_MS. No effect on non-blocking sockets.
+    struct timeval snd_tv = { .tv_sec = 1 };
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &snd_tv, sizeof(snd_tv));
+
     if (!registry_add(t)) {
         fprintf(stderr, "tls_transport: handle registry full, dropping "
                 "connection.\n");
@@ -353,6 +368,10 @@ int transport_fd(transport_handle_t t)
 
 ssize_t transport_read(transport_handle_t t, void *buf, size_t len)
 {
+    if (t->broken) {
+        errno = ECONNRESET;
+        return -1;
+    }
 #if CONFIG_ESP_TLS_ENABLED
     int ret = mbedtls_ssl_read(&t->ssl, buf, len);
     if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -374,6 +393,10 @@ ssize_t transport_read(transport_handle_t t, void *buf, size_t len)
 
 ssize_t transport_write(transport_handle_t t, const void *buf, size_t len)
 {
+    if (t->broken) {
+        errno = ECONNRESET;
+        return -1;
+    }
 #if CONFIG_ESP_TLS_ENABLED
     int ret = mbedtls_ssl_write(&t->ssl, buf, len);
     if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -395,6 +418,7 @@ int transport_write_all(transport_handle_t t, const void *buf, size_t len)
 {
     const uint8_t *p = buf;
     size_t sent = 0;
+    int64_t stall_start_us = 0;     // 0 = not currently stalled
 
     while (sent < len) {
         ssize_t n = transport_write(t, p + sent, len - sent);
@@ -405,11 +429,24 @@ int transport_write_all(transport_handle_t t, const void *buf, size_t len)
                 // Non-blocking socket with a full send buffer, or mbedTLS
                 // signaling WANT_READ/WANT_WRITE mid-record: wait briefly
                 // and retry (with the same buf/len, satisfying mbedTLS's
-                // retry contract) rather than treating this as fatal. A
-                // genuinely dead peer is eventually caught here too, since
-                // TCP keepalives (configured by each module right after
-                // accept()) turn into a real error once probes are
-                // exhausted.
+                // retry contract) rather than treating this as fatal.
+                // TCP keepalives don't help against a peer that is alive
+                // but has stopped reading (zero window, probes still
+                // answered), so give up if no bytes go out for
+                // TRANSPORT_WRITE_STALL_MS. Any progress resets the timer.
+                int64_t now_us = esp_timer_get_time();
+                if (stall_start_us == 0) {
+                    stall_start_us = now_us;
+                } else if (now_us - stall_start_us >
+                        (int64_t)TRANSPORT_WRITE_STALL_MS * 1000) {
+                    fprintf(stderr, "tls_transport: peer not reading for "
+                            "%d ms, giving up on write.\n",
+                            TRANSPORT_WRITE_STALL_MS);
+                    t->broken = true;
+                    shutdown(t->fd, SHUT_RDWR);   // reads now see EOF too
+                    errno = ETIMEDOUT;
+                    return -1;
+                }
                 // pdMS_TO_TICKS(1) truncates to 0 at this project's 100Hz
                 // tick rate, which would turn this into a busy taskYIELD()
                 // spin instead of a real wait -- force at least 1 tick.
@@ -420,6 +457,7 @@ int transport_write_all(transport_handle_t t, const void *buf, size_t len)
             return -1;
         }
         sent += (size_t)n;
+        stall_start_us = 0;
     }
     return 0;
 }
