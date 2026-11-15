@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include "esp_timer.h"
@@ -139,6 +140,47 @@ static void log_mbedtls_error(const char *what, int ret)
     fprintf(stderr, "tls_transport: %s: %s (ret=%d)\n", what, buf, ret);
 }
 
+// Handshake-only receive callback: like mbedtls_net_recv(), but one deadline
+// covers the whole handshake. SO_RCVTIMEO only bounds each recv(), and
+// mbedtls_ssl_handshake() keeps reading internally while bytes keep arriving,
+// so a peer trickling bytes slower than that timeout would never return
+// control to a caller-side deadline check.
+struct hs_bio {
+    int fd;
+    int64_t deadline_us;
+};
+
+static int hs_bio_recv(void *ctx, unsigned char *buf, size_t len)
+{
+    struct hs_bio *b = ctx;
+    int64_t remaining_us = b->deadline_us - esp_timer_get_time();
+    if (remaining_us <= 0)
+        return MBEDTLS_ERR_SSL_TIMEOUT;
+
+    struct timeval tv = {
+        .tv_sec = remaining_us / 1000000,
+        .tv_usec = remaining_us % 1000000,
+    };
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(b->fd, &rfds);
+    int r = select(b->fd + 1, &rfds, NULL, NULL, &tv);
+    if (r == 0)
+        return MBEDTLS_ERR_SSL_TIMEOUT;
+    if (r < 0)
+        return errno == EINTR ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
+
+    ssize_t n = recv(b->fd, buf, len, 0);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return MBEDTLS_ERR_SSL_WANT_READ;
+        if (errno == EPIPE || errno == ECONNRESET)
+            return MBEDTLS_ERR_NET_CONN_RESET;
+        return MBEDTLS_ERR_NET_RECV_FAILED;
+    }
+    return (int)n;
+}
+
 #endif // CONFIG_ESP_TLS_ENABLED
 
 esp_err_t tls_transport_global_init(void)
@@ -223,7 +265,13 @@ transport_handle_t transport_wrap(int fd)
         free(t);
         return NULL;
     }
-    mbedtls_ssl_set_bio(&t->ssl, &t->net, mbedtls_net_send, mbedtls_net_recv, NULL);
+    // Total handshake budget; enforced in hs_bio_recv() below.
+    struct hs_bio hs = {
+        .fd = fd,
+        .deadline_us = esp_timer_get_time() +
+                (int64_t)CONFIG_ESP_TLS_HANDSHAKE_TIMEOUT_MS * 1000,
+    };
+    mbedtls_ssl_set_bio(&t->ssl, &hs, mbedtls_net_send, hs_bio_recv, NULL);
 
     // Bound the handshake -- most of this project's services accept only
     // one client at a time, so a client that opens the TCP connection but
@@ -237,16 +285,17 @@ transport_handle_t transport_wrap(int fd)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-    // SO_RCVTIMEO/SO_SNDTIMEO only bound each individual recv()/send(), not
-    // this whole retry loop -- a peer that keeps the handshake alive one
-    // slow byte at a time could otherwise wedge it forever. Bound the total
-    // elapsed time too.
-    int64_t deadline_us = esp_timer_get_time() +
-            (int64_t)CONFIG_ESP_TLS_HANDSHAKE_TIMEOUT_MS * 1000;
+    // SO_SNDTIMEO bounds each send(); hs_bio_recv() enforces the overall
+    // deadline on the receive side. The loop only retries WANT_READ/WANT_WRITE
+    // from EINTR and the like.
     do {
         ret = mbedtls_ssl_handshake(&t->ssl);
     } while ((ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
-            && esp_timer_get_time() < deadline_us);
+            && esp_timer_get_time() < hs.deadline_us);
+
+    // hs lives on this stack frame: switch to the permanent receive callback
+    // before anything else can touch the BIO.
+    mbedtls_ssl_set_bio(&t->ssl, &t->net, mbedtls_net_send, mbedtls_net_recv, NULL);
 
     struct timeval no_tv = {0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &no_tv, sizeof(no_tv));
