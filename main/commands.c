@@ -562,12 +562,6 @@ static int status_cmd_handler(void *context, int argc, char **argv)
     struct command_context *ctx = context;
     FILE *out = ctx->out;
 
-#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
-    const char *gpio_allow_list = CONFIG_ESP_GPIO_CONTROL_ALLOWED_PINS;
-    fprintf(out, "GPIO: allow-list=%s (see gpio list for pin details)\n",
-            gpio_allow_list[0] ? gpio_allow_list : "(none)");
-#endif
-
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     if (wifi_get_operating_mode() == WIFI_OPERATING_MODE_AP) {
         esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
@@ -648,6 +642,12 @@ static int status_cmd_handler(void *context, int argc, char **argv)
     defined(CONFIG_ESP_UART_BRIDGE_2_ENABLED) || \
     defined(CONFIG_ESP_UART_BRIDGE_3_ENABLED)
     uart_bridge_print_status(out);
+#endif
+
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    const char *gpio_allow_list = CONFIG_ESP_GPIO_CONTROL_ALLOWED_PINS;
+    fprintf(out, "GPIO: allow-list=%s (see gpio list for pin details)\n",
+            gpio_allow_list[0] ? gpio_allow_list : "(none)");
 #endif
 
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
