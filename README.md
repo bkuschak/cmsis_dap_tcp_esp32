@@ -182,6 +182,14 @@ idf.py fullclean menuconfig build flash
    CMSIS-DAP config → ADC streaming → Enable ADC streaming
    ```
 
+* Specific GPIO pins can be controlled using the console commands. To enable
+  this feature, select this option and define the set of pins to use. Refer to
+  the [Optional GPIO control section](#optional-gpio-control) below for details.
+
+   ```
+   CMSIS-DAP config → Manual GPIO control → Enable lightweight GPIO control commands
+   ```
+
 If you want to use this code as a component in another application see [this
 section](#usage-as-a-component) below.
 
@@ -633,102 +641,82 @@ the ADC reading from a current sense amplifier:
 
 ## Optional GPIO control
 
-On ESP32-C3, ESP32-S3 and ESP32-C6, configure **CMSIS-DAP configuration >
-Manual GPIO control > Enable lightweight GPIO control commands**
-(`CONFIG_ESP_GPIO_CONTROL_ENABLED`). This feature is disabled by default.
-Enable at least one console to make the option available. It uses the existing
-serial and TCP consoles without creating another task. Existing sdkconfig
-files that explicitly enable it keep that setting until it is changed in
-menuconfig.
+Specific GPIO pins can be controlled using the console commands. This feature
+is disabled by default. To enable, select:
 
-Set `CONFIG_ESP_GPIO_CONTROL_ALLOWED_PINS` to a comma-separated list of unused,
-exposed GPIO numbers for your board. The default empty list permits no pins,
-including restoration of any previously saved GPIO configurations.
-When GPIO control is enabled, the `status` command shows the configured GPIO
-allow-list, or `(none)` when it is empty. Use `gpio list` for each pin's
-availability and configuration.
-Check the board schematic before adding pins: exclude strapping pins and pins
-connected to other board peripherals. Pins reserved by ESP-IDF (including
-flash/PSRAM), configured DAP/reset/LED and UART/console pins are rejected even
-when allow-listed. Native USB and chip-debug JTAG pins remain unavailable.
-When ADC streaming is enabled, only its selected GPIO and any GPIO still held
-by an existing ADC connection are excluded. Other ADC1-capable pins remain
-available for manual GPIO control, subject to the other restrictions above.
+```
+CMSIS-DAP config → Manual GPIO control → Enable lightweight GPIO control commands
+```
 
-Both consoles accept the same commands (replace `<pin>` with an allowed GPIO):
+Set `CONFIG_ESP_GPIO_CONTROL_ALLOWED_PINS` to a comma-separated list of unused
+GPIO numbers for your board. Only these pins may be controlled. The default
+list is empty. Check the board schematic before adding pins. Exclude strapping
+pins and pins connected to other board peripherals. Pins reserved by ESP-IDF
+(including flash/PSRAM), configured DAP/reset/LED and UART/console pins are
+rejected even when allow-listed. Native USB and chip-debug JTAG pins remain
+unavailable. When ADC streaming is enabled, its associated GPIO is excluded.
+Other ADC1-capable pins remain available for manual GPIO control, subject to
+the restrictions above.
 
-```text
+Use these console commands. Replace `<pin>` with a GPIO number. Replace
+`<state>` with `0` or `1`, for low or high.
+
+```
 gpio list
-gpio config <pin> input
-gpio config <pin> input floating
-gpio config <pin> input pull-up
-gpio config <pin> input pull-down
-gpio config <pin> push-pull 0
-gpio config <pin> open-drain 1
-gpio config <pin> open-drain 1 pull-up
+gpio config <pin> input [floating|pull-up|pull-down]
+gpio config <pin> push-pull <state>
+gpio config <pin> open-drain <state> [floating|pull-up]
 gpio read <pin>
-gpio write <pin> 0
+gpio write <pin> <state>
+
 gpio save <pin>
 gpio clear <pin>
 ```
 
-For inputs, the pull argument is optional and defaults to `floating`. The
-explicit `floating`, `pull-up` and `pull-down` options remain available.
+`config` applies the mode, pull-up/down, and initial output level.
 
-`config` applies the mode, input pull and initial output level only at runtime.
-`write` changes only the commanded output level. Neither command writes NVS or
-changes previously saved startup settings, so scripts can reconfigure pins
-repeatedly without writing flash.
+`write` changes the commanded output level. For open-drain outputs, level 0
+drives low and level 1 releases the pin.
 
-Use `save <pin>` to explicitly save that pin's current mode, input pull and
-commanded output level as its startup defaults in NVS. For example, configuring
-an output at 0, writing 1, then saving it makes its startup level 1. For
-open-drain outputs, the commanded level is saved, not the measured pin voltage.
-Unsaved changes are lost on reboot; previously saved settings are restored.
-Saved configurations are checked against the current allow-list and pin
-restrictions before being restored, before either console starts.
-The default output latch is loaded before enabling the output driver; these
-defaults take effect during application startup, not throughout reset or the
-bootloader.
+`read` reports the physical input level.
+
+For inputs and open-drain outputs, the pull argument is optional and defaults
+to `floating`.
+
+`config` and `write` are volatile commands: nothing is stored to NV storage
+until `save` or `clear` is sent. For example, scripts may configure and write
+pins repeatedly, without ever committing these settings to flash.
+
+`save <pin>` saves that pin's current mode, input pull-up/down, and commanded
+output level as its startup defaults in NV storage. For example, configuring an
+output at 0, then writing 1, then saving it makes its startup level 1. Unsaved
+changes are lost on reboot; previously saved settings are restored at
+application startup. Saved configurations are checked against the current
+allow-list and pin restrictions before being restored, before either console
+starts. The output latch is loaded before enabling the output driver.
 
 `clear <pin>` explicitly removes that pin's saved configuration and leaves it
-as a floating input. Only `save` and `clear` write GPIO settings to NVS.
-`read` and `save` require a configured pin. `read` reports its physical input
-level; `list` shows live state and saved startup settings separately. For outputs,
-`commanded` is the requested output level and `level` is the measured pin state.
+as a floating input.
 
-For open-drain outputs, level 0 drives low and level 1 releases the pin. The
-optional final argument is `floating` (the default) or `pull-up`. `pull-up`
-enables the ESP32's weak internal pull-up; `floating` disables internal pull
-resistors. Use an external pull-up when the connected circuit needs a stronger
-pull-up, to a voltage supported by both devices. The pull selection is a live
-setting until explicitly saved with `save <pin>`, and saved selections are
-restored at boot. The optional pull argument is accepted only for open-drain;
-push-pull outputs keep internal pull resistors disabled. Operations from
-simultaneous console clients are serialized with a mutex.
+`list` shows live state and saved startup settings. For outputs, `commanded` is
+the requested output level and `level` is the measured pin state.
 
-ADC settings changes use the same mutex. An ADC configuration cannot select
-a pin configured for manual GPIO control (including a saved startup
-configuration), and manual GPIO commands cannot take a selected or active ADC
-pin. Use `gpio clear <pin>` to remove manual ownership before assigning it to
-ADC. Clearing ADC overrides also checks the default ADC pin for conflicts.
-
-ADC setting changes still take effect on the next client connection. For
-example, if ADC is sampling GPIO1 and GPIO2 is selected for the next connection,
-both pins are protected until the current connection ends and the driver is
-deinitialized. GPIO1 then becomes available if no longer selected. If driver
-deinitialization fails, the old pin stays protected and further ADC connections
-are refused until reboot. Saved manual GPIO settings that conflict with the
-selected ADC pin are skipped at startup; they are not erased from NVS.
+Some pins may be shared between ADC and GPIO usage. Use `gpio clear <pin>`
+before assigning a pin to ADC streaming. ADC setting changes take effect on
+the next client connection. For example, if ADC is sampling GPIO1 and then
+GPIO2 is selected for the next connection, both pins are protected until the
+current connection ends and the driver is deinitialized. GPIO1 then becomes
+available if no longer selected. Saved manual GPIO settings that conflict with
+the selected ADC pin are skipped at startup; they are not erased from NVS.
 
 When using this as a component, initialize NVS and call `gpio_control_init()`
 before starting the ADC service or exposing the consoles. When consuming this
 as a component, the running ADC instance's supplied configuration provides the
 fallback ADC pin; before it starts, the Kconfig default is used. A conflicting
 manual GPIO configuration prevents that ADC instance from starting. The
-automatic interface exclusions follow the
-project's Kconfig settings; exclude any additional or differently assigned
-host-application pins from the allow-list yourself.
+automatic interface exclusions follow the project's Kconfig settings; exclude
+any additional or differently assigned host-application pins from the
+allow-list yourself.
 
 # Usage as a component
 
