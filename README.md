@@ -301,6 +301,84 @@ UART bridge 1: UART1, listening on port 4442. 115200-8-N-1. GPIOs: TX=21 RX=20.
 UART bridge 1: connected to client '192.168.0.55:63381'. Bytes: TX=2759 RX=32454.
 ```
 
+### SoftAP mode (direct connection without a router)
+
+The default operating mode can be selected in **CMSIS-DAP configuration →
+WiFi configuration → WiFi operating mode** in `idf.py menuconfig`. Both
+Station and SoftAP defaults are compiled into the firmware, so the active
+mode can also be changed later from the console without rebuilding.
+
+Before selecting SoftAP, configure a unique WPA2 password (8-63 bytes)
+either through menuconfig or with the `ap` console command. A blank password
+is rejected at startup. The menuconfig SoftAP SSID defaults to `ESP32 STLINK`,
+and the channel defaults to 1. You may also set the maximum number of clients.
+
+For example, while the device is running in Station mode, use the serial
+console to configure SoftAP, select it, and reboot:
+
+```
+esp32> ap "ESP32 Debugger" "StrongPassword123" 6
+esp32> wifi_mode ap
+esp32> reboot
+```
+
+To switch back to Station without losing either mode's credentials:
+
+```
+esp32> wifi_mode sta
+esp32> reboot
+```
+
+To restore the menuconfig *mode* selection (without erasing credentials):
+
+```
+esp32> wifi_mode default
+esp32> reboot
+```
+
+The existing `wifi "<ssid>" "<password>" [auth_mode]` command remains
+available in either mode. Likewise, `ap "<ssid>" "<password>" [channel]`
+changes SoftAP settings while either mode is active. If `channel` is omitted,
+the menuconfig default channel is used, just as `wifi` uses its default
+authentication mode when omitted. Use `ap "" ""` to clear stored SoftAP
+overrides; this does **not** change the saved mode selection or erase Station
+credentials. Ensure menuconfig has a valid SoftAP password before clearing
+SoftAP overrides if SoftAP is the selected mode.
+
+Configuration changes take effect after a reboot. The current mode and
+SoftAP SSID/channel are shown by `status`. Passwords are not printed by the
+commands, but credentials entered over a TCP console are not encrypted; use
+the serial console for sensitive configuration.
+
+The ESP32 creates a WiFi network using ESP-IDF's
+default SoftAP interface, DHCP server, and IPv4 address
+**`192.168.4.1`**. Connect the host computer to the ESP32 network. This
+network does **not** provide Internet access. To confirm connectivity:
+
+```
+ping 192.168.4.1
+```
+
+Configure the OpenOCD CMSIS-DAP TCP backend to use the ESP32's address:
+
+```
+adapter driver cmsis-dap
+cmsis-dap backend tcp
+cmsis-dap tcp host 192.168.4.1
+cmsis-dap tcp port 4441
+transport select swd
+```
+
+The existing CMSIS-DAP TCP, socket console, and UART TCP bridge ports remain
+unchanged; for example, the default UART bridge #1 uses TCP port `4442`.
+Use the `status` console command to display the current WiFi mode, SoftAP
+IP address, and listening services. Previously saved Station credentials are
+preserved when switching to SoftAP mode.
+
+Only use this SoftAP feature on networks/devices you trust:
+WiFi authentication protects association to the network, but CMSIS-DAP
+TCP itself does not provide user authentication.
+
 # Building and Running OpenOCD
 
 Get the latest source code from git. Configure and build it as usual:
@@ -453,85 +531,6 @@ Info : [stm32f4x.cpu] starting gdb server on 3333
 Info : Listening on port 3333 for gdb connections
 Info : accepting 'telnet' connection on tcp/4444
 ```
-
-### SoftAP mode (direct connection without a router)
-
-The default operating mode can be selected in **CMSIS-DAP configuration →
-WiFi configuration → WiFi operating mode** in `idf.py menuconfig`. Both
-Station and SoftAP defaults are compiled into the firmware, so the active
-mode can also be changed later from the console without rebuilding.
-
-Before selecting SoftAP, configure a unique WPA2 password (8-63 bytes)
-either through menuconfig or with the `ap` console command. A blank password
-is rejected at startup. The menuconfig SoftAP SSID defaults to `ESP32 STLINK`,
-and the channel defaults to 1. You may also set the maximum number of clients.
-
-For example, while the device is running in Station mode, use the serial
-console to configure SoftAP, select it, and reboot:
-
-```
-esp32> ap "ESP32 Debugger" "StrongPassword123" 6
-esp32> wifi_mode ap
-esp32> reboot
-```
-
-To switch back to Station without losing either mode's credentials:
-
-```
-esp32> wifi_mode sta
-esp32> reboot
-```
-
-To restore the menuconfig *mode* selection (without erasing credentials):
-
-```
-esp32> wifi_mode default
-esp32> reboot
-```
-
-The existing `wifi "<ssid>" "<password>" [auth_mode]` command remains
-available in either mode. Likewise, `ap "<ssid>" "<password>" [channel]`
-changes SoftAP settings while either mode is active. If `channel` is omitted,
-the menuconfig default channel is used, just as `wifi` uses its default
-authentication mode when omitted. Use `ap "" ""` to clear stored SoftAP
-overrides; this does **not** change the saved mode selection or erase Station
-credentials. Ensure menuconfig has a valid SoftAP password before clearing
-SoftAP overrides if SoftAP is the selected mode.
-
-Configuration changes take effect after a reboot. The current mode and
-SoftAP SSID/channel are shown by `status`. Passwords are not printed by the
-commands, but credentials entered over a TCP console are not encrypted; use
-the serial console for sensitive configuration.
-
-The ESP32 creates a WiFi network using ESP-IDF's
-default SoftAP interface, DHCP server, and IPv4 address
-**`192.168.4.1`**. Connect the host computer to the ESP32 network. This
-network does **not** provide Internet access. To confirm connectivity:
-
-```sh
-ping 192.168.4.1
-```
-
-Configure the OpenOCD CMSIS-DAP TCP backend to use the ESP32's address:
-
-```tcl
-adapter driver cmsis-dap
-cmsis-dap backend tcp
-cmsis-dap tcp host 192.168.4.1
-cmsis-dap tcp port 4441
-transport select swd
-```
-
-The existing CMSIS-DAP TCP, socket console, and UART TCP bridge ports remain
-unchanged; for example, the default UART bridge #1 uses TCP port `4442`.
-Use the `status` console command to display the current WiFi mode, SoftAP
-IP address, and listening services. Previously saved Station credentials are
-preserved when switching to SoftAP mode.
-
-Only use this SoftAP feature on networks/devices you trust:
-WiFi authentication protects association to the network, but CMSIS-DAP
-TCP itself does not provide user authentication.
-
 
 ## Using ESP32-S3 @ 240 MHz
 
