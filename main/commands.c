@@ -29,6 +29,12 @@
 #include "uart_bridge.h"
 #include "reboot.h"
 
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+#include "gpio_control.h"
+
+static int gpio_cmd_handler(void *context, int argc, char **argv);
+#endif
+
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
 #include "adc_stream.h"
 #include "soc/soc_caps.h"
@@ -638,6 +644,12 @@ static int status_cmd_handler(void *context, int argc, char **argv)
     uart_bridge_print_status(out);
 #endif
 
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    const char *gpio_allow_list = CONFIG_ESP_GPIO_CONTROL_ALLOWED_PINS;
+    fprintf(out, "GPIO: allow-list=%s (see gpio list for pin details)\n",
+            gpio_allow_list[0] ? gpio_allow_list : "(none)");
+#endif
+
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
     adc_stream_print_status(out);
 #endif
@@ -650,6 +662,9 @@ static int help_cmd_handler(void *context, int argc, char **argv)
     FILE *out = ctx->out;
     fprintf(out, "Available commands:\n");
     fprintf(out, "  help - Show this help message.\n");
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    fprintf(out, "  gpio list/config/read/write/save/clear - Control allowed GPIOs; run gpio for usage.\n");
+#endif
 #ifdef CONFIG_ESP_DAP_MANAGE_WIFI
     fprintf(out, "  wifi \"<ssid>\" \"<password>\" [auth_mode] - Configure Station credentials.\n");
     fprintf(out, "  ap \"<ssid>\" \"<password>\" [channel] - Configure SoftAP settings.\n");
@@ -669,6 +684,14 @@ static int help_cmd_handler(void *context, int argc, char **argv)
     fprintf(out, "  status - Report network status.\n");
     return 0;
 }
+
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+static int gpio_cmd_handler(void *context, int argc, char **argv)
+{
+    struct command_context *ctx = context;
+    return gpio_control_command(ctx->out, argc, argv);
+}
+#endif
 
 static struct command_context *command_context_create(enum command_transport transport,
         FILE *out)
@@ -735,6 +758,9 @@ static const struct {
     const char *name;
     int (*func)(void *context, int argc, char **argv);
 } socket_commands[] = {
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    { "gpio",   gpio_cmd_handler },
+#endif
 #ifdef CONFIG_ESP_ADC_STREAM_ENABLED
     { "adc",    adc_cmd_handler },
 #endif
@@ -946,6 +972,16 @@ void commands_init_serial(void)
     esp_console_deregister_help_command();
 
     // Register commands.
+#ifdef CONFIG_ESP_GPIO_CONTROL_ENABLED
+    const esp_console_cmd_t gpio_cmd = {
+        .command = "gpio",
+        .help = "Configure, read or write allowed GPIOs",
+        .func_w_context = gpio_cmd_handler,
+        .context = ctx,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&gpio_cmd));
+#endif
+
     const esp_console_cmd_t help_cmd = {
         .command = "help",
         .help = "Show available commands",

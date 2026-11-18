@@ -819,6 +819,39 @@ menu "CMSIS-DAP configuration"
 
     endmenu
 
+    menu "Manual GPIO control"
+
+        config ESP_GPIO_CONTROL_ENABLED
+            bool "Enable lightweight GPIO control commands"
+            default n
+            depends on ESP_DAP_SERIAL_CONSOLE_ENABLED || ESP_DAP_SOCKET_CONSOLE_ENABLED
+            depends on IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C6
+            help
+                Adds gpio list/config/read/write/save/clear to the existing consoles.
+                Supports digital inputs with floating/pull-up/pull-down and
+                push-pull or open-drain outputs. Config and write change only
+                live state; use save to store the current configuration and
+                output level as startup defaults in NVS. Clear removes saved
+                settings and leaves a floating input. No additional task is created.
+                Disabled by default. Enable this feature and configure the
+                allow-list below to control GPIOs appropriate for your board.
+
+        config ESP_GPIO_CONTROL_ALLOWED_PINS
+            string "GPIO control allow-list (comma-separated pin numbers)"
+            default ""
+            depends on ESP_GPIO_CONTROL_ENABLED
+            help
+                Explicitly list unused, exposed board GPIOs, for example 3,11.
+                An empty list allows no pins. ESP-IDF reserved pins, configured
+                DAP/LED/UART/console pins and native USB/chip-debug JTAG pins
+                are rejected even if listed here. When ADC streaming is enabled,
+                its selected GPIO and any GPIO still held by an existing ADC
+                connection are excluded; other ADC1-capable pins remain usable.
+                Exclude board-specific peripherals, strapping pins and any pins
+                used by the host application yourself.
+
+    endmenu
+
     menu "ADC streaming"
 
         config ESP_ADC_STREAM_ENABLED
